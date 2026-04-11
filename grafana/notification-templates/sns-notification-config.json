@@ -1,0 +1,58 @@
+{
+  "contactPoints": [
+    {
+      "name": "SNS-Alerts",
+      "receivers": [
+        {
+          "uid": "sns-main",
+          "type": "sns",
+          "settings": {
+            "topic": "${SNS_TOPIC_ARN}",
+            "authProvider": "default",
+            "messageFormat": "json"
+          },
+          "disableResolveMessage": false
+        }
+      ]
+    }
+  ],
+  "notificationTemplates": [
+    {
+      "name": "aws-alert-title",
+      "template": "{{ define \"aws-alert-title\" }}[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}{{ end }}"
+    },
+    {
+      "name": "aws-alert-body",
+      "template": "{{ define \"aws-alert-body\" }}\nAlert: {{ .CommonLabels.alertname }}\nStatus: {{ .Status | toUpper }}\nSeverity: {{ .CommonLabels.severity | toUpper }}\nService: {{ .CommonLabels.service }}\nTeam: {{ .CommonLabels.team }}\n{{ range .Alerts }}\nSummary: {{ .Annotations.summary }}\nDescription: {{ .Annotations.description }}\nStarted: {{ .StartsAt.Format \"2006-01-02 15:04:05 UTC\" }}\n{{ end }}\n{{ end }}"
+    },
+    {
+      "name": "aws-critical",
+      "template": "{{ define \"aws-critical\" }}\nCRITICAL ALERT\n{{ template \"aws-alert-title\" . }}\n{{ template \"aws-alert-body\" . }}\nRequires immediate attention.\n{{ end }}"
+    },
+    {
+      "name": "aws-resolved",
+      "template": "{{ define \"aws-resolved\" }}\nRESOLVED\n{{ template \"aws-alert-title\" . }}\nService: {{ .CommonLabels.service }}\nAlert resolved - system returned to normal.\n{{ end }}"
+    }
+  ],
+  "policies": {
+    "receiver": "SNS-Alerts",
+    "group_by": ["alertname","service"],
+    "group_wait": "30s",
+    "group_interval": "5m",
+    "repeat_interval": "1h",
+    "routes": [
+      {
+        "receiver": "SNS-Alerts",
+        "match": {"severity":"critical"},
+        "group_wait": "10s",
+        "repeat_interval": "30m"
+      },
+      {
+        "receiver": "SNS-Alerts",
+        "match": {"severity":"warning"},
+        "group_wait": "30s",
+        "repeat_interval": "2h"
+      }
+    ]
+  }
+}

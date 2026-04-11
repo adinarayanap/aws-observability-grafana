@@ -1,0 +1,51 @@
+{
+  "title": "AWS Infrastructure Observability",
+  "uid": "aws-infra-v1",
+  "schemaVersion": 38,
+  "refresh": "1m",
+  "tags": ["aws","observability","cloudwatch"],
+  "time": {"from": "now-3h", "to": "now"},
+  "panels": [
+    {
+      "id": 1, "type": "gauge", "title": "CPU Utilization",
+      "gridPos": {"h":6,"w":6,"x":0,"y":0},
+      "datasource": {"type":"cloudwatch"},
+      "targets": [{"namespace":"AWS/EC2","metricName":"CPUUtilization","statistic":"Average","period":"300","refId":"A"}],
+      "fieldConfig": {"defaults":{"min":0,"max":100,"unit":"percent","thresholds":{"steps":[{"color":"green"},{"color":"yellow","value":60},{"color":"red","value":80}]}}}
+    },
+    {
+      "id": 2, "type": "gauge", "title": "Memory Utilization",
+      "gridPos": {"h":6,"w":6,"x":6,"y":0},
+      "datasource": {"type":"cloudwatch"},
+      "targets": [{"namespace":"CWAgent","metricName":"mem_used_percent","statistic":"Average","period":"300","refId":"A"}],
+      "fieldConfig": {"defaults":{"min":0,"max":100,"unit":"percent","thresholds":{"steps":[{"color":"green"},{"color":"yellow","value":70},{"color":"red","value":85}]}}}
+    },
+    {
+      "id": 3, "type": "timeseries", "title": "CPU Trend",
+      "gridPos": {"h":6,"w":12,"x":12,"y":0},
+      "datasource": {"type":"cloudwatch"},
+      "targets": [
+        {"namespace":"AWS/EC2","metricName":"CPUUtilization","statistic":"Average","period":"300","refId":"A"},
+        {"namespace":"AWS/EC2","metricName":"CPUUtilization","statistic":"Maximum","period":"300","refId":"B"}
+      ]
+    },
+    {
+      "id": 4, "type": "timeseries", "title": "ALB Status Codes",
+      "gridPos": {"h":7,"w":12,"x":0,"y":6},
+      "datasource": {"type":"cloudwatch"},
+      "targets": [
+        {"namespace":"AWS/ApplicationELB","metricName":"HTTPCode_Target_2XX_Count","statistic":"Sum","period":"60","refId":"A"},
+        {"namespace":"AWS/ApplicationELB","metricName":"HTTPCode_Target_4XX_Count","statistic":"Sum","period":"60","refId":"B"},
+        {"namespace":"AWS/ApplicationELB","metricName":"HTTPCode_Target_5XX_Count","statistic":"Sum","period":"60","refId":"C"}
+      ]
+    },
+    {
+      "id": 5, "type": "timeseries", "title": "RDS Connections",
+      "gridPos": {"h":7,"w":12,"x":12,"y":6},
+      "datasource": {"type":"cloudwatch"},
+      "targets": [
+        {"namespace":"AWS/RDS","metricName":"DatabaseConnections","statistic":"Average","period":"300","refId":"A"}
+      ]
+    }
+  ]
+}

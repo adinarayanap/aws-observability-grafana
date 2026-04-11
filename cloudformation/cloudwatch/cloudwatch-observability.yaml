@@ -1,0 +1,192 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: CloudWatch log groups, metric filters, alarms, and dashboard.
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: production
+  AlertSNSTopicArn:
+    Type: String
+  ApplicationName:
+    Type: String
+    Default: myapp
+
+Resources:
+  ApplicationLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/${EnvironmentName}/${ApplicationName}/application"
+      RetentionInDays: 30
+
+  ErrorLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/${EnvironmentName}/${ApplicationName}/errors"
+      RetentionInDays: 90
+
+  AccessLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/${EnvironmentName}/${ApplicationName}/access"
+      RetentionInDays: 14
+
+  ErrorMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref ApplicationLogGroup
+      FilterPattern: "[timestamp, requestId, level=ERROR, ...]"
+      MetricTransformations:
+        - MetricName: !Sub "${ApplicationName}ErrorCount"
+          MetricNamespace: !Sub "Custom/${EnvironmentName}/Application"
+          MetricValue: "1"
+          DefaultValue: 0
+
+  HighCPUAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${EnvironmentName}-${ApplicationName}-HighCPU"
+      AlarmDescription: CPU utilization exceeded 80%
+      Namespace: AWS/EC2
+      MetricName: CPUUtilization
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertSNSTopicArn
+      OKActions:
+        - !Ref AlertSNSTopicArn
+
+  HighMemoryAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${EnvironmentName}-${ApplicationName}-HighMemory"
+      AlarmDescription: Memory utilization exceeded 85%
+      Namespace: CWAgent
+      MetricName: mem_used_percent
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 85
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertSNSTopicArn
+
+  HighErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${EnvironmentName}-${ApplicationName}-HighErrors"
+      AlarmDescription: Application error count exceeded threshold
+      Namespace: !Sub "Custom/${EnvironmentName}/Application"
+      MetricName: !Sub "${ApplicationName}ErrorCount"
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertSNSTopicArn
+
+  ALB5xxAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${EnvironmentName}-ALB5xxErrors"
+      AlarmDescription: ALB returning 5xx errors
+      Namespace: AWS/ApplicationELB
+      MetricName: HTTPCode_Target_5XX_Count
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 3
+      Threshold: 10
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertSNSTopicArn
+
+  ObservabilityDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub "${EnvironmentName}-${ApplicationName}-observability"
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "text",
+              "x": 0, "y": 0, "width": 24, "height": 2,
+              "properties": {
+                "markdown": "# ${EnvironmentName} Observability Dashboard"
+              }
+            },
+            {
+              "type": "alarm",
+              "x": 0, "y": 2, "width": 24, "height": 2,
+              "properties": {
+                "title": "Alarm Status",
+                "alarms": [
+                  "arn:aws:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:${EnvironmentName}-${ApplicationName}-HighCPU",
+                  "arn:aws:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:${EnvironmentName}-${ApplicationName}-HighMemory",
+                  "arn:aws:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:${EnvironmentName}-${ApplicationName}-HighErrors",
+                  "arn:aws:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:${EnvironmentName}-ALB5xxErrors"
+                ]
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0, "y": 4, "width": 12, "height": 6,
+              "properties": {
+                "title": "CPU Utilization %",
+                "region": "${AWS::Region}",
+                "metrics": [["AWS/EC2","CPUUtilization",{"stat":"Average","label":"CPU %"}]],
+                "period": 300,
+                "yAxis": {"left": {"min": 0, "max": 100}},
+                "view": "timeSeries"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12, "y": 4, "width": 12, "height": 6,
+              "properties": {
+                "title": "Memory Utilization %",
+                "region": "${AWS::Region}",
+                "metrics": [["CWAgent","mem_used_percent",{"stat":"Average","label":"Memory %"}]],
+                "period": 300,
+                "yAxis": {"left": {"min": 0, "max": 100}},
+                "view": "timeSeries"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0, "y": 10, "width": 12, "height": 6,
+              "properties": {
+                "title": "Application Error Count",
+                "region": "${AWS::Region}",
+                "metrics": [["Custom/${EnvironmentName}/Application","${ApplicationName}ErrorCount",{"stat":"Sum","label":"Errors"}]],
+                "period": 300,
+                "view": "timeSeries"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12, "y": 10, "width": 12, "height": 6,
+              "properties": {
+                "title": "ALB HTTP Status Codes",
+                "region": "${AWS::Region}",
+                "metrics": [
+                  ["AWS/ApplicationELB","HTTPCode_Target_2XX_Count",{"stat":"Sum","label":"2xx"}],
+                  ["AWS/ApplicationELB","HTTPCode_Target_4XX_Count",{"stat":"Sum","label":"4xx"}],
+                  ["AWS/ApplicationELB","HTTPCode_Target_5XX_Count",{"stat":"Sum","label":"5xx"}]
+                ],
+                "period": 60,
+                "view": "timeSeries"
+              }
+            }
+          ]
+        }
+
+Outputs:
+  DashboardURL:
+    Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/cloudwatch/home?region=${AWS::Region}#dashboards:name=${EnvironmentName}-${ApplicationName}-observability"

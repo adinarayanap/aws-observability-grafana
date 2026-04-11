@@ -1,0 +1,74 @@
+{
+  "name": "AWS Observability Alerts",
+  "interval": "1m",
+  "rules": [
+    {
+      "uid": "alert-high-cpu",
+      "title": "High CPU Utilization",
+      "condition": "C",
+      "for": "5m",
+      "labels": {"severity":"warning","service":"ec2","team":"platform"},
+      "annotations": {
+        "summary": "High CPU detected",
+        "description": "EC2 CPU exceeded 80% for 5 minutes. Value: {{ $values.A }}%"
+      },
+      "data": [
+        {"refId":"A","datasourceUid":"${CLOUDWATCH_DS_UID}",
+         "model":{"namespace":"AWS/EC2","metricName":"CPUUtilization","statistic":"Average","period":"300","dimensions":{}}},
+        {"refId":"C","datasourceUid":"-100",
+         "model":{"type":"classic_conditions","conditions":[{"evaluator":{"type":"gt","params":[80]},"query":{"params":["A"]},"reducer":{"type":"last"}}]}}
+      ]
+    },
+    {
+      "uid": "alert-high-memory",
+      "title": "High Memory Utilization",
+      "condition": "C",
+      "for": "5m",
+      "labels": {"severity":"warning","service":"ec2","team":"platform"},
+      "annotations": {
+        "summary": "High memory detected",
+        "description": "Memory exceeded 85% for 5 minutes. Value: {{ $values.A }}%"
+      },
+      "data": [
+        {"refId":"A","datasourceUid":"${CLOUDWATCH_DS_UID}",
+         "model":{"namespace":"CWAgent","metricName":"mem_used_percent","statistic":"Average","period":"300","dimensions":{}}},
+        {"refId":"C","datasourceUid":"-100",
+         "model":{"type":"classic_conditions","conditions":[{"evaluator":{"type":"gt","params":[85]},"query":{"params":["A"]},"reducer":{"type":"last"}}]}}
+      ]
+    },
+    {
+      "uid": "alert-high-errors",
+      "title": "High Application Error Rate",
+      "condition": "C",
+      "for": "2m",
+      "labels": {"severity":"critical","service":"myapp","team":"application"},
+      "annotations": {
+        "summary": "Application error rate critically high",
+        "description": "Error count exceeded 5/5min. Count: {{ $values.A }}"
+      },
+      "data": [
+        {"refId":"A","datasourceUid":"${CLOUDWATCH_DS_UID}",
+         "model":{"namespace":"Custom/production/Application","metricName":"myappErrorCount","statistic":"Sum","period":"300","dimensions":{}}},
+        {"refId":"C","datasourceUid":"-100",
+         "model":{"type":"classic_conditions","conditions":[{"evaluator":{"type":"gt","params":[5]},"query":{"params":["A"]},"reducer":{"type":"last"}}]}}
+      ]
+    },
+    {
+      "uid": "alert-alb-5xx",
+      "title": "ALB 5xx Error Spike",
+      "condition": "C",
+      "for": "3m",
+      "labels": {"severity":"critical","service":"alb","team":"platform"},
+      "annotations": {
+        "summary": "ALB returning 5xx errors",
+        "description": "ALB 5xx count exceeded 10 for 3 consecutive minutes"
+      },
+      "data": [
+        {"refId":"A","datasourceUid":"${CLOUDWATCH_DS_UID}",
+         "model":{"namespace":"AWS/ApplicationELB","metricName":"HTTPCode_Target_5XX_Count","statistic":"Sum","period":"60","dimensions":{}}},
+        {"refId":"C","datasourceUid":"-100",
+         "model":{"type":"classic_conditions","conditions":[{"evaluator":{"type":"gt","params":[10]},"query":{"params":["A"]},"reducer":{"type":"sum"}}]}}
+      ]
+    }
+  ]
+}

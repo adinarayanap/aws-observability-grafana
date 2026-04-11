@@ -1,0 +1,95 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: AWS Managed Grafana Workspace with SSO and SNS alerts.
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: production
+  SSOOrganizationId:
+    Type: String
+  NotificationEmail:
+    Type: String
+    Default: adinarayanap@hotmail.com
+
+Resources:
+  AlertSNSTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: !Sub "Grafana Alerts ${EnvironmentName}"
+
+  AlertSNSSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref AlertSNSTopic
+      Protocol: email
+      Endpoint: !Ref NotificationEmail
+
+  GrafanaWorkspaceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${EnvironmentName}-grafana-workspace-role-v2"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: grafana.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonGrafanaCloudWatchAccess
+      Policies:
+        - PolicyName: GrafanaSNSPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cloudwatch:DescribeAlarms
+                  - cloudwatch:ListMetrics
+                  - cloudwatch:GetMetricData
+                  - cloudwatch:GetMetricStatistics
+                  - logs:DescribeLogGroups
+                  - logs:GetLogGroupFields
+                  - logs:StartQuery
+                  - logs:GetQueryResults
+                  - logs:GetLogEvents
+                  - ec2:DescribeTags
+                  - ec2:DescribeInstances
+                  - tag:GetResources
+                Resource: "*"
+              - Effect: Allow
+                Action: sns:Publish
+                Resource: !Ref AlertSNSTopic
+
+  GrafanaWorkspace:
+    Type: AWS::Grafana::Workspace
+    DependsOn: GrafanaWorkspaceRole
+    Properties:
+      Name: !Sub "${EnvironmentName}-observability"
+      AccountAccessType: CURRENT_ACCOUNT
+      AuthenticationProviders:
+        - AWS_SSO
+      PermissionType: CUSTOMER_MANAGED
+      RoleArn: !GetAtt GrafanaWorkspaceRole.Arn
+      DataSources:
+        - CLOUDWATCH
+      NotificationDestinations:
+        - SNS
+      GrafanaVersion: "10.4"
+
+Outputs:
+  GrafanaWorkspaceId:
+    Value: !Ref GrafanaWorkspace
+    Export:
+      Name: !Sub "${EnvironmentName}-GrafanaWorkspaceId"
+  GrafanaEndpoint:
+    Value: !Sub "https://${GrafanaWorkspace.Endpoint}"
+    Export:
+      Name: !Sub "${EnvironmentName}-GrafanaEndpoint"
+  AlertSNSTopicArn:
+    Value: !Ref AlertSNSTopic
+    Export:
+      Name: !Sub "${EnvironmentName}-AlertSNSTopicArn"

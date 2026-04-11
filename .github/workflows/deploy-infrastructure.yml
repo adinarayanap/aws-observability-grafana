@@ -1,0 +1,71 @@
+name: Deploy Infrastructure
+
+on:
+  push:
+    branches: [main]
+    paths: ["cloudformation/**"]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Environment
+        default: production
+        type: choice
+        options: [production, staging]
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  ENVIRONMENT: ${{ github.event.inputs.environment || 'production' }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/${{ env.ENVIRONMENT }}-github-actions-deploy-role
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy Grafana stack
+        run: |
+          aws cloudformation deploy \
+            --template-file cloudformation/grafana/grafana-workspace.yaml \
+            --stack-name ${{ env.ENVIRONMENT }}-grafana-v2 \
+            --region ${{ env.AWS_REGION }} \
+            --parameter-overrides \
+              EnvironmentName=${{ env.ENVIRONMENT }} \
+              SSOOrganizationId=${{ secrets.SSO_ORGANIZATION_ID }} \
+              NotificationEmail=adinarayanap@hotmail.com \
+            --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+            --no-fail-on-empty-changeset
+
+      - name: Deploy CloudWatch stack
+        run: |
+          SNS_ARN=$(aws cloudformation describe-stacks \
+            --stack-name ${{ env.ENVIRONMENT }}-grafana-v2 \
+            --region ${{ env.AWS_REGION }} \
+            --query "Stacks[0].Outputs[?OutputKey=='AlertSNSTopicArn'].OutputValue" \
+            --output text)
+          aws cloudformation deploy \
+            --template-file cloudformation/cloudwatch/cloudwatch-observability.yaml \
+            --stack-name ${{ env.ENVIRONMENT }}-cloudwatch-observability \
+            --region ${{ env.AWS_REGION }} \
+            --parameter-overrides \
+              EnvironmentName=${{ env.ENVIRONMENT }} \
+              AlertSNSTopicArn=$SNS_ARN \
+              ApplicationName=myapp \
+            --no-fail-on-empty-changeset
+
+      - name: Summary
+        run: |
+          echo "## Deployment Complete" >> $GITHUB_STEP_SUMMARY
+          echo "| Stack | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| Grafana Workspace | Deployed |" >> $GITHUB_STEP_SUMMARY
+          echo "| CloudWatch | Deployed |" >> $GITHUB_STEP_SUMMARY

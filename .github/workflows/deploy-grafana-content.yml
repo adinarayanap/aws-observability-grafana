@@ -1,0 +1,78 @@
+name: Deploy Grafana Dashboards and Alerts
+
+on:
+  push:
+    branches: [main]
+    paths: ["grafana/**"]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Environment
+        default: production
+        type: choice
+        options: [production, staging]
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  ENVIRONMENT: ${{ github.event.inputs.environment || 'production' }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/${{ env.ENVIRONMENT }}-github-actions-deploy-role
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Get Grafana workspace info
+        id: info
+        run: |
+          WS_ID=$(aws ssm get-parameter \
+            --name "/observability/${{ env.ENVIRONMENT }}/grafana-workspace-id" \
+            --query "Parameter.Value" --output text \
+            --region ${{ env.AWS_REGION }} 2>/dev/null \
+            || echo "${{ secrets.GRAFANA_WORKSPACE_ID }}")
+          ENDPOINT=$(aws grafana describe-workspace \
+            --workspace-id "$WS_ID" \
+            --region ${{ env.AWS_REGION }} \
+            --query "workspace.endpoint" --output text)
+          API_KEY=$(aws grafana create-workspace-api-key \
+            --workspace-id "$WS_ID" \
+            --key-name "gha-${{ github.run_id }}" \
+            --key-role ADMIN \
+            --seconds-to-live 600 \
+            --region ${{ env.AWS_REGION }} \
+            --query "key" --output text)
+          echo "::add-mask::$API_KEY"
+          echo "ws_id=$WS_ID" >> $GITHUB_OUTPUT
+          echo "url=https://$ENDPOINT" >> $GITHUB_OUTPUT
+          echo "api_key=$API_KEY" >> $GITHUB_OUTPUT
+
+      - name: Deploy dashboards
+        run: |
+          for f in grafana/dashboards/*.json; do
+            PAYLOAD=$(jq -n --argjson d "$(cat $f)" \
+              '{dashboard:$d,overwrite:true,folderId:0}')
+            curl -sf -X POST \
+              -H "Authorization: Bearer ${{ steps.info.outputs.api_key }}" \
+              -H "Content-Type: application/json" \
+              -d "$PAYLOAD" \
+              "${{ steps.info.outputs.url }}/api/dashboards/import" || true
+            echo "Deployed: $f"
+          done
+
+      - name: Cleanup API key
+        if: always()
+        run: |
+          aws grafana delete-workspace-api-key \
+            --workspace-id "${{ steps.info.outputs.ws_id }}" \
+            --key-name "gha-${{ github.run_id }}" \
+            --region ${{ env.AWS_REGION }} || true
