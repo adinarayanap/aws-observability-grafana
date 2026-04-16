@@ -1,5 +1,5 @@
-AWSTemplateFormatVersion: "2010-09-09"
-Description: AWS Managed Grafana Workspace with SSO and SNS alerts.
+AWSTemplateFormatVersion: '2010-09-09'
+Description: AWS Managed Grafana - complete stack with custom resources
 
 Parameters:
   EnvironmentName:
@@ -7,15 +7,101 @@ Parameters:
     Default: production
   SSOOrganizationId:
     Type: String
+    Default: d-9f675059e1
   NotificationEmail:
     Type: String
-    Default: adinarayanap@hotmail.com
+    Default: adiawss@outlook.com
+  ArtifactsBucket:
+    Type: String
+    Description: S3 bucket containing Lambda zips and dashboard JSONs
+  GrafanaUser1Id:
+    Type: String
+    Default: b1738dea-8051-707d-472d-cf6e504f2627
+    Description: grafana-user SSO ID
+  GrafanaUser2Id:
+    Type: String
+    Default: 71239d8a-b011-707c-a5a0-d56fc0d04462
+    Description: grafana_vendor SSO ID
 
 Resources:
+
+  # ── IAM Role for Grafana Workspace ──────────────────────────
+  GrafanaWorkspaceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${EnvironmentName}-GrafanaWorkspaceRole"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: grafana.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonGrafanaCloudWatchAccess
+      Policies:
+        - PolicyName: GrafanaSNSAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [sns:Publish, sns:ListTopics]
+                Resource: !Ref AlertSNSTopic
+        - PolicyName: GrafanaSSMAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [ssm:GetParameter, ssm:PutParameter]
+                Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/observability/*"
+
+  # ── IAM Role for Lambda Custom Resources ────────────────────
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${EnvironmentName}-GrafanaLambdaRole"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: LambdaGrafanaPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - grafana:CreateWorkspaceApiKey
+                  - grafana:DeleteWorkspaceApiKey
+                  - grafana:UpdatePermissions
+                  - grafana:ListPermissions
+                  - grafana:DescribeWorkspace
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub "arn:aws:s3:::${ArtifactsBucket}"
+                  - !Sub "arn:aws:s3:::${ArtifactsBucket}/*"
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "*"
+
+  # ── SNS Topic for Alerts ─────────────────────────────────────
   AlertSNSTopic:
     Type: AWS::SNS::Topic
     Properties:
-      DisplayName: !Sub "Grafana Alerts ${EnvironmentName}"
+      TopicName: !Sub "${EnvironmentName}-grafana-alerts"
+      DisplayName: "Grafana Observability Alerts"
 
   AlertSNSSubscription:
     Type: AWS::SNS::Subscription
@@ -24,51 +110,12 @@ Resources:
       Protocol: email
       Endpoint: !Ref NotificationEmail
 
-  GrafanaWorkspaceRole:
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName: !Sub "${EnvironmentName}-grafana-workspace-role-v2"
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: grafana.amazonaws.com
-            Action: sts:AssumeRole
-            Condition:
-              StringEquals:
-                aws:SourceAccount: !Ref AWS::AccountId
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AmazonGrafanaCloudWatchAccess
-      Policies:
-        - PolicyName: GrafanaSNSPolicy
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - cloudwatch:DescribeAlarms
-                  - cloudwatch:ListMetrics
-                  - cloudwatch:GetMetricData
-                  - cloudwatch:GetMetricStatistics
-                  - logs:DescribeLogGroups
-                  - logs:GetLogGroupFields
-                  - logs:StartQuery
-                  - logs:GetQueryResults
-                  - logs:GetLogEvents
-                  - ec2:DescribeTags
-                  - ec2:DescribeInstances
-                  - tag:GetResources
-                Resource: "*"
-              - Effect: Allow
-                Action: sns:Publish
-                Resource: !Ref AlertSNSTopic
-
+  # ── Grafana Workspace ─────────────────────────────────────────
   GrafanaWorkspace:
     Type: AWS::Grafana::Workspace
-    DependsOn: GrafanaWorkspaceRole
     Properties:
       Name: !Sub "${EnvironmentName}-observability"
+      Description: "AWS Managed Grafana - Adi Polisetty - production observability"
       AccountAccessType: CURRENT_ACCOUNT
       AuthenticationProviders:
         - AWS_SSO
@@ -76,20 +123,128 @@ Resources:
       RoleArn: !GetAtt GrafanaWorkspaceRole.Arn
       DataSources:
         - CLOUDWATCH
+        - XRAY
       NotificationDestinations:
         - SNS
       GrafanaVersion: "10.4"
+
+  # ── SSM Parameters ────────────────────────────────────────────
+  WorkspaceIdParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/observability/${EnvironmentName}/grafana-workspace-id"
+      Type: String
+      Value: !Ref GrafanaWorkspace
+
+  SNSTopicArnParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/observability/${EnvironmentName}/sns-topic-arn"
+      Type: String
+      Value: !Ref AlertSNSTopic
+
+  # ── Lambda 1: SSO User Assigner ───────────────────────────────
+  SSOUserAssignerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${EnvironmentName}-sso-user-assigner"
+      Runtime: python3.12
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 120
+      Code:
+        S3Bucket: !Ref ArtifactsBucket
+        S3Key: lambda/sso_user_assigner.zip
+
+  SSOUserAssignerResource:
+    Type: AWS::CloudFormation::CustomResource
+    DependsOn: GrafanaWorkspace
+    Properties:
+      ServiceToken: !GetAtt SSOUserAssignerFunction.Arn
+      WorkspaceId: !Ref GrafanaWorkspace
+      Region: !Ref AWS::Region
+      UserIds:
+        - !Ref GrafanaUser1Id
+        - !Ref GrafanaUser2Id
+
+  # ── Lambda 2: CloudWatch Datasource ──────────────────────────
+  GrafanaDatasourceFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${EnvironmentName}-grafana-datasource"
+      Runtime: python3.12
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 120
+      Code:
+        S3Bucket: !Ref ArtifactsBucket
+        S3Key: lambda/grafana_datasource.zip
+
+  GrafanaDatasourceResource:
+    Type: AWS::CloudFormation::CustomResource
+    DependsOn: SSOUserAssignerResource
+    Properties:
+      ServiceToken: !GetAtt GrafanaDatasourceFunction.Arn
+      WorkspaceId: !Ref GrafanaWorkspace
+      Region: !Ref AWS::Region
+
+  # ── Lambda 3: Dashboard Deployer ─────────────────────────────
+  GrafanaDashboardFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${EnvironmentName}-grafana-dashboard"
+      Runtime: python3.12
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 180
+      Code:
+        S3Bucket: !Ref ArtifactsBucket
+        S3Key: lambda/grafana_dashboard.zip
+
+  GrafanaDashboardResource:
+    Type: AWS::CloudFormation::CustomResource
+    DependsOn: GrafanaDatasourceResource
+    Properties:
+      ServiceToken: !GetAtt GrafanaDashboardFunction.Arn
+      WorkspaceId: !Ref GrafanaWorkspace
+      Region: !Ref AWS::Region
+      DashboardsBucket: !Ref ArtifactsBucket
+      DashboardsPrefix: "grafana/dashboards/"
+
+  # ── Lambda 4: Server Down Alert Creator ──────────────────────
+  GrafanaAlertFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${EnvironmentName}-grafana-alert"
+      Runtime: python3.12
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 120
+      Code:
+        S3Bucket: !Ref ArtifactsBucket
+        S3Key: lambda/grafana_alert.zip
+
+  GrafanaAlertResource:
+    Type: AWS::CloudFormation::CustomResource
+    DependsOn: GrafanaDashboardResource
+    Properties:
+      ServiceToken: !GetAtt GrafanaAlertFunction.Arn
+      WorkspaceId: !Ref GrafanaWorkspace
+      Region: !Ref AWS::Region
+      RunbookUrl: "https://github.com/adinarayanap/aws-observability-grafana/blob/main/docs/runbooks/server-down.md"
 
 Outputs:
   GrafanaWorkspaceId:
     Value: !Ref GrafanaWorkspace
     Export:
       Name: !Sub "${EnvironmentName}-GrafanaWorkspaceId"
+
   GrafanaEndpoint:
-    Value: !Sub "https://${GrafanaWorkspace.Endpoint}"
+    Value: !Sub "https://${GrafanaWorkspace}.grafana-workspace.${AWS::Region}.amazonaws.com"
     Export:
       Name: !Sub "${EnvironmentName}-GrafanaEndpoint"
-  AlertSNSTopicArn:
+
+  SNSTopicArn:
     Value: !Ref AlertSNSTopic
     Export:
-      Name: !Sub "${EnvironmentName}-AlertSNSTopicArn"
+      Name: !Sub "${EnvironmentName}-SNSTopicArn"

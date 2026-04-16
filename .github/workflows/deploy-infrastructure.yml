@@ -1,71 +1,109 @@
-name: Deploy Infrastructure
+name: Deploy Complete Observability Stack
 
 on:
   push:
     branches: [main]
-    paths: ["cloudformation/**"]
+    paths:
+      - 'cloudformation/**'
+      - 'lambda/**'
+      - 'grafana/**'
+      - '.github/workflows/deploy-infrastructure.yml'
   workflow_dispatch:
-    inputs:
-      environment:
-        description: Environment
-        default: production
-        type: choice
-        options: [production, staging]
 
 permissions:
   id-token: write
   contents: read
 
 env:
-  AWS_REGION: ${{ secrets.AWS_REGION }}
-  ENVIRONMENT: ${{ github.event.inputs.environment || 'production' }}
+  AWS_REGION: us-east-1
+  ENVIRONMENT: production
+  SSO_ORG_ID: d-9f675059e1
+  NOTIFICATION_EMAIL: adiawss@outlook.com
 
 jobs:
   deploy:
+    name: Deploy Full Stack
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
 
-      - name: Configure AWS credentials
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/${{ env.ENVIRONMENT }}-github-actions-deploy-role
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/production-GitHubActionsRole
           aws-region: ${{ env.AWS_REGION }}
+
+      - name: Get S3 artifacts bucket name
+        run: |
+          BUCKET=$(aws cloudformation describe-stacks \
+            --stack-name production-github-oidc-role \
+            --region ${{ env.AWS_REGION }} \
+            --query "Stacks[0].Outputs[?OutputKey=='ArtifactsBucketName'].OutputValue" \
+            --output text)
+          echo "ARTIFACTS_BUCKET=$BUCKET" >> $GITHUB_ENV
+          echo "Artifacts bucket: $BUCKET"
+
+      - name: Package and upload Lambda functions
+        run: |
+          cd lambda
+
+          for dir in sso_user_assigner grafana_datasource grafana_dashboard grafana_alert; do
+            echo "Packaging: $dir"
+            cd $dir
+            zip -r ../../${dir}.zip index.py
+            cd ..
+            aws s3 cp ../${dir}.zip \
+              s3://${{ env.ARTIFACTS_BUCKET }}/lambda/${dir}.zip
+            echo "Uploaded: lambda/${dir}.zip"
+            rm ../${dir}.zip
+          done
+
+          echo "All Lambda packages uploaded"
+
+      - name: Upload dashboard JSONs to S3
+        run: |
+          aws s3 sync grafana/dashboards/ \
+            s3://${{ env.ARTIFACTS_BUCKET }}/grafana/dashboards/ \
+            --delete
+          echo "Dashboards uploaded to S3"
 
       - name: Deploy Grafana stack
         run: |
           aws cloudformation deploy \
             --template-file cloudformation/grafana/grafana-workspace.yaml \
-            --stack-name ${{ env.ENVIRONMENT }}-grafana-v2 \
+            --stack-name production-grafana-v2 \
             --region ${{ env.AWS_REGION }} \
             --parameter-overrides \
               EnvironmentName=${{ env.ENVIRONMENT }} \
-              SSOOrganizationId=${{ secrets.SSO_ORGANIZATION_ID }} \
-              NotificationEmail=adinarayanap@hotmail.com \
+              SSOOrganizationId=${{ env.SSO_ORG_ID }} \
+              NotificationEmail=${{ env.NOTIFICATION_EMAIL }} \
+              ArtifactsBucket=${{ env.ARTIFACTS_BUCKET }} \
+              GrafanaUser1Id=b1738dea-8051-707d-472d-cf6e504f2627 \
+              GrafanaUser2Id=71239d8a-b011-707c-a5a0-d56fc0d04462 \
             --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
             --no-fail-on-empty-changeset
+          echo "Grafana stack deployed"
 
       - name: Deploy CloudWatch stack
         run: |
-          SNS_ARN=$(aws cloudformation describe-stacks \
-            --stack-name ${{ env.ENVIRONMENT }}-grafana-v2 \
-            --region ${{ env.AWS_REGION }} \
-            --query "Stacks[0].Outputs[?OutputKey=='AlertSNSTopicArn'].OutputValue" \
-            --output text)
           aws cloudformation deploy \
             --template-file cloudformation/cloudwatch/cloudwatch-observability.yaml \
-            --stack-name ${{ env.ENVIRONMENT }}-cloudwatch-observability \
+            --stack-name production-cloudwatch-observability \
             --region ${{ env.AWS_REGION }} \
             --parameter-overrides \
               EnvironmentName=${{ env.ENVIRONMENT }} \
-              AlertSNSTopicArn=$SNS_ARN \
               ApplicationName=myapp \
+            --capabilities CAPABILITY_IAM \
             --no-fail-on-empty-changeset
+          echo "CloudWatch stack deployed"
 
-      - name: Summary
+      - name: Print Grafana URL
         run: |
-          echo "## Deployment Complete" >> $GITHUB_STEP_SUMMARY
-          echo "| Stack | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
-          echo "| Grafana Workspace | Deployed |" >> $GITHUB_STEP_SUMMARY
-          echo "| CloudWatch | Deployed |" >> $GITHUB_STEP_SUMMARY
+          WORKSPACE_ID=$(aws ssm get-parameter \
+            --name "/observability/production/grafana-workspace-id" \
+            --region ${{ env.AWS_REGION }} \
+            --query "Parameter.Value" --output text)
+          echo "Grafana URL: https://${WORKSPACE_ID}.grafana-workspace.${{ env.AWS_REGION }}.amazonaws.com"
+          echo "Dashboard: https://${WORKSPACE_ID}.grafana-workspace.${{ env.AWS_REGION }}.amazonaws.com/d/aws-infra-overview"
