@@ -236,16 +236,10 @@ Resources:
 Outputs:
   GrafanaWorkspaceId:
     Value: !Ref GrafanaWorkspace
-    Export:
-      Name: !Sub "${EnvironmentName}-GrafanaWorkspaceId"
 
   GrafanaEndpoint:
     Value: !Sub "https://${GrafanaWorkspace}.grafana-workspace.${AWS::Region}.amazonaws.com"
-    Export:
-      Name: !Sub "${EnvironmentName}-GrafanaEndpoint"
 
   SNSTopicArn:
     Value: !Ref AlertSNSTopic
-    Export:
-      Name: !Sub "${EnvironmentName}-SNSTopicArn"
 # Lambda zips uploaded Thu Apr 16 05:50:57 AM UTC 2026
