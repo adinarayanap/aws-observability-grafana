@@ -2,7 +2,25 @@ import json
 import boto3
 import urllib.request
 import urllib.error
-import cfnresponse
+
+def send_response(event, context, status, data):
+    body = json.dumps({
+        'Status': status,
+        'Reason': 'See CloudWatch logs',
+        'PhysicalResourceId': context.log_stream_name,
+        'StackId': event['StackId'],
+        'RequestId': event['RequestId'],
+        'LogicalResourceId': event['LogicalResourceId'],
+        'Data': data
+    })
+    req = urllib.request.Request(
+        event['ResponseURL'],
+        data=body.encode(),
+        headers={'content-type': '', 'content-length': str(len(body))},
+        method='PUT'
+    )
+    urllib.request.urlopen(req)
+    print(f"Response sent: {status}")
 
 def create_key(client, workspace_id, name):
     return client.create_workspace_api_key(
@@ -32,13 +50,13 @@ def call_grafana(endpoint, token, method, path, payload=None):
 def get_dashboards(bucket, prefix):
     s3   = boto3.client('s3')
     resp = s3.list_objects_v2(Bucket=bucket, Prefix=prefix)
-    dashboards = []
+    out  = []
     for obj in resp.get('Contents', []):
         if obj['Key'].endswith('.json'):
             body = s3.get_object(Bucket=bucket, Key=obj['Key'])['Body'].read()
-            dashboards.append(json.loads(body))
+            out.append(json.loads(body))
             print(f"Loaded: {obj['Key']}")
-    return dashboards
+    return out
 
 def handler(event, context):
     print(json.dumps(event))
@@ -51,31 +69,24 @@ def handler(event, context):
     key_name     = f"cfn-dash-{workspace_id[:8]}"
     client       = boto3.client('grafana', region_name=region)
     token        = None
-
     try:
         if event['RequestType'] == 'Delete':
-            cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+            send_response(event, context, 'SUCCESS', {})
             return
-
         token      = create_key(client, workspace_id, key_name)
         dashboards = get_dashboards(bucket, prefix)
         deployed   = []
-
         for dash in dashboards:
             result = call_grafana(
-                endpoint, token, 'POST',
-                '/api/dashboards/import',
+                endpoint, token, 'POST', '/api/dashboards/import',
                 {"dashboard": dash, "overwrite": True, "folderId": 0})
             deployed.append(result.get('uid', 'unknown'))
             print(f"Deployed: {dash.get('title')} → {result.get('url')}")
-
-        cfnresponse.send(event, context, cfnresponse.SUCCESS,
-            {'Count': str(len(deployed)),
-             'Deployed': ','.join(deployed)})
-
+        send_response(event, context, 'SUCCESS',
+            {'Count': str(len(deployed)), 'Deployed': ','.join(deployed)})
     except Exception as e:
         print(f"Error: {e}")
-        cfnresponse.send(event, context, cfnresponse.FAILED, {'Error': str(e)})
+        send_response(event, context, 'FAILED', {'Error': str(e)})
     finally:
         if token:
             delete_key(client, workspace_id, key_name)
