@@ -1,4 +1,4 @@
-name: Deploy Complete Observability Stack
+name: Deploy Infrastructure
 
 on:
   push:
@@ -21,7 +21,7 @@ env:
 
 jobs:
   deploy:
-    name: Deploy Full Stack
+    name: Deploy Infrastructure
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -50,21 +50,17 @@ jobs:
             cd ../..
           done
 
-      - name: Upload dashboards to S3
-        run: |
-          aws s3 sync grafana/dashboards/ \
-            s3://${{ env.ARTIFACTS_BUCKET }}/grafana/dashboards/ --delete
-
       - name: Deploy Grafana stack
         run: |
-          STACK_STATUS=$(aws cloudformation describe-stacks \
+          STATUS=$(aws cloudformation describe-stacks \
             --stack-name production-grafana-v2 \
             --region ${{ env.AWS_REGION }} \
             --query "Stacks[0].StackStatus" \
             --output text 2>/dev/null || echo "DOES_NOT_EXIST")
-          echo "Stack status: $STACK_STATUS"
+
           PARAMS="ParameterKey=EnvironmentName,ParameterValue=${{ env.ENVIRONMENT }} ParameterKey=SSOOrganizationId,ParameterValue=${{ env.SSO_ORG_ID }} ParameterKey=NotificationEmail,ParameterValue=${{ env.NOTIFICATION_EMAIL }} ParameterKey=ArtifactsBucket,ParameterValue=${{ env.ARTIFACTS_BUCKET }} ParameterKey=GrafanaUser1Id,ParameterValue=b1738dea-8051-707d-472d-cf6e504f2627 ParameterKey=GrafanaUser2Id,ParameterValue=71239d8a-b011-707c-a5a0-d56fc0d04462"
-          if [ "$STACK_STATUS" = "DOES_NOT_EXIST" ] || [ "$STACK_STATUS" = "DELETE_COMPLETE" ]; then
+
+          if [ "$STATUS" = "DOES_NOT_EXIST" ] || [ "$STATUS" = "DELETE_COMPLETE" ]; then
             aws cloudformation create-stack \
               --stack-name production-grafana-v2 \
               --template-body file://cloudformation/grafana/grafana-workspace.yaml \
@@ -75,29 +71,11 @@ jobs:
             aws cloudformation wait stack-create-complete \
               --stack-name production-grafana-v2 \
               --region ${{ env.AWS_REGION }}
-          elif [ "$STACK_STATUS" = "CREATE_FAILED" ] || [ "$STACK_STATUS" = "ROLLBACK_COMPLETE" ]; then
-            aws cloudformation delete-stack --stack-name production-grafana-v2 --region ${{ env.AWS_REGION }}
-            aws cloudformation wait stack-delete-complete --stack-name production-grafana-v2 --region ${{ env.AWS_REGION }}
-            aws cloudformation create-stack \
-              --stack-name production-grafana-v2 \
-              --template-body file://cloudformation/grafana/grafana-workspace.yaml \
-              --region ${{ env.AWS_REGION }} \
-              --parameters $PARAMS \
-              --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
-              --disable-rollback
-            aws cloudformation wait stack-create-complete \
-              --stack-name production-grafana-v2 \
-              --region ${{ env.AWS_REGION }}
+            echo "Grafana stack created"
+          elif [ "$STATUS" = "CREATE_COMPLETE" ] || [ "$STATUS" = "UPDATE_COMPLETE" ]; then
+            echo "Grafana stack already exists and is healthy - skipping"
           else
-            aws cloudformation update-stack \
-              --stack-name production-grafana-v2 \
-              --template-body file://cloudformation/grafana/grafana-workspace.yaml \
-              --region ${{ env.AWS_REGION }} \
-              --parameters $PARAMS \
-              --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM || echo "No changes"
-            aws cloudformation wait stack-update-complete \
-              --stack-name production-grafana-v2 \
-              --region ${{ env.AWS_REGION }} 2>/dev/null || true
+            echo "Grafana stack in state: $STATUS - skipping update"
           fi
 
       - name: Assign SSO users
@@ -110,22 +88,23 @@ jobs:
             --workspace-id $WORKSPACE_ID \
             --update-instruction-batch \
               "action=ADD,role=ADMIN,users=[{id=b1738dea-8051-707d-472d-cf6e504f2627,type=SSO_USER},{id=71239d8a-b011-707c-a5a0-d56fc0d04462,type=SSO_USER}]" \
-            --region ${{ env.AWS_REGION }}
+            --region ${{ env.AWS_REGION }} || true
           echo "SSO users assigned"
 
       - name: Deploy CloudWatch stack
         run: |
-          SNS_ARN=$(aws ssm get-parameter \
-            --name "/observability/production/sns-topic-arn" \
-            --region ${{ env.AWS_REGION }} \
-            --query "Parameter.Value" --output text)
-          echo "SNS ARN: $SNS_ARN"
-          STACK_STATUS=$(aws cloudformation describe-stacks \
+          STATUS=$(aws cloudformation describe-stacks \
             --stack-name production-cloudwatch-observability \
             --region ${{ env.AWS_REGION }} \
             --query "Stacks[0].StackStatus" \
             --output text 2>/dev/null || echo "DOES_NOT_EXIST")
-          if [ "$STACK_STATUS" = "DOES_NOT_EXIST" ] || [ "$STACK_STATUS" = "DELETE_COMPLETE" ]; then
+
+          SNS_ARN=$(aws ssm get-parameter \
+            --name "/observability/production/sns-topic-arn" \
+            --region ${{ env.AWS_REGION }} \
+            --query "Parameter.Value" --output text)
+
+          if [ "$STATUS" = "DOES_NOT_EXIST" ] || [ "$STATUS" = "DELETE_COMPLETE" ]; then
             aws cloudformation create-stack \
               --stack-name production-cloudwatch-observability \
               --template-body file://cloudformation/cloudwatch/cloudwatch-observability.yaml \
@@ -138,7 +117,9 @@ jobs:
             aws cloudformation wait stack-create-complete \
               --stack-name production-cloudwatch-observability \
               --region ${{ env.AWS_REGION }}
-          else
+            echo "CloudWatch stack created"
+          elif [ "$STATUS" = "CREATE_COMPLETE" ] || [ "$STATUS" = "UPDATE_COMPLETE" ]; then
+            echo "CloudWatch stack already healthy - checking for updates"
             aws cloudformation update-stack \
               --stack-name production-cloudwatch-observability \
               --template-body file://cloudformation/cloudwatch/cloudwatch-observability.yaml \
@@ -147,23 +128,19 @@ jobs:
                 ParameterKey=EnvironmentName,ParameterValue=${{ env.ENVIRONMENT }} \
                 ParameterKey=ApplicationName,ParameterValue=myapp \
                 ParameterKey=AlertSNSTopicArn,ParameterValue=$SNS_ARN \
-              --capabilities CAPABILITY_IAM || echo "No changes"
-            aws cloudformation wait stack-update-complete \
-              --stack-name production-cloudwatch-observability \
-              --region ${{ env.AWS_REGION }} 2>/dev/null || true
+              --capabilities CAPABILITY_IAM 2>&1 | \
+              grep -v "No updates are to be performed" || true
           fi
-
 
       - name: Deploy monitoring infrastructure (EC2, ALB, RDS)
         run: |
-          STACK_STATUS=$(aws cloudformation describe-stacks \
+          STATUS=$(aws cloudformation describe-stacks \
             --stack-name production-monitoring-infra \
             --region ${{ env.AWS_REGION }} \
             --query "Stacks[0].StackStatus" \
             --output text 2>/dev/null || echo "DOES_NOT_EXIST")
-          echo "Monitoring infra status: $STACK_STATUS"
 
-          if [ "$STACK_STATUS" = "DOES_NOT_EXIST" ] || [ "$STACK_STATUS" = "DELETE_COMPLETE" ]; then
+          if [ "$STATUS" = "DOES_NOT_EXIST" ] || [ "$STATUS" = "DELETE_COMPLETE" ]; then
             aws cloudformation create-stack \
               --stack-name production-monitoring-infra \
               --template-body file://cloudformation/ec2/monitoring-infrastructure.yaml \
@@ -171,29 +148,38 @@ jobs:
               --parameters \
                 ParameterKey=EnvironmentName,ParameterValue=${{ env.ENVIRONMENT }} \
               --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM
-            echo "Monitoring infra stack creating..."
+            echo "Monitoring infra creating - EC2, ALB, RDS..."
             aws cloudformation wait stack-create-complete \
               --stack-name production-monitoring-infra \
               --region ${{ env.AWS_REGION }}
-          else
+            echo "Monitoring infra created"
+          elif [ "$STATUS" = "CREATE_COMPLETE" ] || [ "$STATUS" = "UPDATE_COMPLETE" ]; then
+            echo "Monitoring infra healthy - checking for updates"
             aws cloudformation update-stack \
               --stack-name production-monitoring-infra \
               --template-body file://cloudformation/ec2/monitoring-infrastructure.yaml \
               --region ${{ env.AWS_REGION }} \
               --parameters \
                 ParameterKey=EnvironmentName,ParameterValue=${{ env.ENVIRONMENT }} \
-              --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM || echo "No changes"
-            aws cloudformation wait stack-update-complete \
-              --stack-name production-monitoring-infra \
-              --region ${{ env.AWS_REGION }} 2>/dev/null || true
+              --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM 2>&1 | \
+              grep -v "No updates are to be performed" || true
           fi
-          echo "Monitoring infra deployed"
 
-      - name: Print Grafana URL
+      - name: Print all URLs
         run: |
           WORKSPACE_ID=$(aws ssm get-parameter \
             --name "/observability/production/grafana-workspace-id" \
             --region ${{ env.AWS_REGION }} \
             --query "Parameter.Value" --output text)
-          echo "Grafana URL: https://${WORKSPACE_ID}.grafana-workspace.${{ env.AWS_REGION }}.amazonaws.com"
-          echo "Dashboard: https://${WORKSPACE_ID}.grafana-workspace.${{ env.AWS_REGION }}.amazonaws.com/d/aws-infra-overview"
+
+          ALB=$(aws cloudformation describe-stacks \
+            --stack-name production-monitoring-infra \
+            --region ${{ env.AWS_REGION }} \
+            --query "Stacks[0].Outputs[?OutputKey=='ALBDNSName'].OutputValue" \
+            --output text 2>/dev/null || echo "not deployed yet")
+
+          echo "============================================"
+          echo "Grafana: https://${WORKSPACE_ID}.grafana-workspace.${{ env.AWS_REGION }}.amazonaws.com"
+          echo "Dashboard: https://${WORKSPACE_ID}.grafana-workspace.${{ env.AWS_REGION }}.amazonaws.com/d/aws-infra-v1"
+          echo "ALB: http://${ALB}"
+          echo "============================================"

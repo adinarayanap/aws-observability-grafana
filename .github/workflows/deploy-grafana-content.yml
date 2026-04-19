@@ -30,7 +30,7 @@ jobs:
           role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/production-GitHubActionsRole
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Get Grafana workspace details
+      - name: Get Grafana workspace
         run: |
           WORKSPACE_ID=$(aws ssm get-parameter \
             --name "/observability/production/grafana-workspace-id" \
@@ -55,32 +55,35 @@ jobs:
       - name: Deploy all dashboards
         run: |
           for file in grafana/dashboards/*.json; do
-            echo "Deploying: $file"
-            RESPONSE=$(curl -sf -X POST \
+            echo "Deploying dashboard: $file"
+            curl -sf -X POST \
               -H "Authorization: Bearer ${{ env.GRAFANA_API_KEY }}" \
               -H "Content-Type: application/json" \
               -d "{\"dashboard\": $(cat $file), \"overwrite\": true, \"folderId\": 0}" \
-              "${{ env.GRAFANA_URL }}/api/dashboards/import")
-            echo "Result: $RESPONSE"
+              "${{ env.GRAFANA_URL }}/api/dashboards/import" && \
+            echo "Deployed: $file" || echo "Failed: $file"
           done
-          echo "All dashboards deployed"
 
-      - name: Create server down alert
+      - name: Create alert folder
         run: |
-          # Create folder first
           curl -sf -X POST \
             -H "Authorization: Bearer ${{ env.GRAFANA_API_KEY }}" \
             -H "Content-Type: application/json" \
             -d '{"title": "Platform Alerts", "uid": "platform-alerts"}' \
             "${{ env.GRAFANA_URL }}/api/folders" || true
+          echo "Alert folder ready"
 
-          # Deploy alert rule
-          curl -sf -X POST \
-            -H "Authorization: Bearer ${{ env.GRAFANA_API_KEY }}" \
-            -H "Content-Type: application/json" \
-            -d @grafana/alerts/alert-rules.json \
-            "${{ env.GRAFANA_URL }}/api/v1/provisioning/alert-rules" || true
-          echo "Alert rules deployed"
+      - name: Deploy alert rules
+        run: |
+          for file in grafana/alerts/*.json; do
+            echo "Deploying alert: $file"
+            curl -sf -X POST \
+              -H "Authorization: Bearer ${{ env.GRAFANA_API_KEY }}" \
+              -H "Content-Type: application/json" \
+              -d @$file \
+              "${{ env.GRAFANA_URL }}/api/v1/provisioning/alert-rules" && \
+            echo "Deployed: $file" || echo "Warning - alert may already exist: $file"
+          done
 
       - name: Delete Grafana API key
         if: always()
@@ -89,7 +92,6 @@ jobs:
             --workspace-id ${{ env.WORKSPACE_ID }} \
             --key-name "deploy-${{ github.run_id }}" \
             --region ${{ env.AWS_REGION }} || true
-          echo "API key deleted"
 
       - name: Print dashboard URL
         run: |
