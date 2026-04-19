@@ -24,10 +24,8 @@ jobs:
   deploy:
     name: Deploy Full Stack
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Configure AWS via OIDC
         uses: aws-actions/configure-aws-credentials@v4
@@ -35,7 +33,7 @@ jobs:
           role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/production-GitHubActionsRole
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Get S3 artifacts bucket name
+      - name: Get S3 bucket
         run: |
           BUCKET=$(aws cloudformation describe-stacks \
             --stack-name production-github-oidc-role \
@@ -43,61 +41,111 @@ jobs:
             --query "Stacks[0].Outputs[?OutputKey=='ArtifactsBucketName'].OutputValue" \
             --output text)
           echo "ARTIFACTS_BUCKET=$BUCKET" >> $GITHUB_ENV
-          echo "Artifacts bucket: $BUCKET"
 
       - name: Package and upload Lambda functions
         run: |
-          cd lambda
-
           for dir in sso_user_assigner grafana_datasource grafana_dashboard grafana_alert; do
-            echo "Packaging: $dir"
-            cd $dir
-            zip -r ../../${dir}.zip index.py
-            cd ..
-            aws s3 cp ../${dir}.zip \
-              s3://${{ env.ARTIFACTS_BUCKET }}/lambda/${dir}.zip
-            echo "Uploaded: lambda/${dir}.zip"
-            rm ../${dir}.zip
+            cd lambda/$dir
+            zip -r /tmp/${dir}.zip index.py
+            aws s3 cp /tmp/${dir}.zip s3://${{ env.ARTIFACTS_BUCKET }}/lambda/${dir}.zip
+            cd ../..
           done
 
-          echo "All Lambda packages uploaded"
-
-      - name: Upload dashboard JSONs to S3
+      - name: Upload dashboards to S3
         run: |
           aws s3 sync grafana/dashboards/ \
-            s3://${{ env.ARTIFACTS_BUCKET }}/grafana/dashboards/ \
-            --delete
-          echo "Dashboards uploaded to S3"
+            s3://${{ env.ARTIFACTS_BUCKET }}/grafana/dashboards/ --delete
 
       - name: Deploy Grafana stack
         run: |
-          aws cloudformation deploy \
-            --template-file cloudformation/grafana/grafana-workspace.yaml \
+          STACK_STATUS=$(aws cloudformation describe-stacks \
             --stack-name production-grafana-v2 \
             --region ${{ env.AWS_REGION }} \
-            --parameter-overrides \
-              EnvironmentName=${{ env.ENVIRONMENT }} \
-              SSOOrganizationId=${{ env.SSO_ORG_ID }} \
-              NotificationEmail=${{ env.NOTIFICATION_EMAIL }} \
-              ArtifactsBucket=${{ env.ARTIFACTS_BUCKET }} \
-              GrafanaUser1Id=b1738dea-8051-707d-472d-cf6e504f2627 \
-              GrafanaUser2Id=71239d8a-b011-707c-a5a0-d56fc0d04462 \
-            --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
-            --no-fail-on-empty-changeset
-          echo "Grafana stack deployed"
+            --query "Stacks[0].StackStatus" \
+            --output text 2>/dev/null || echo "DOES_NOT_EXIST")
+          echo "Stack status: $STACK_STATUS"
+          PARAMS="ParameterKey=EnvironmentName,ParameterValue=${{ env.ENVIRONMENT }} ParameterKey=SSOOrganizationId,ParameterValue=${{ env.SSO_ORG_ID }} ParameterKey=NotificationEmail,ParameterValue=${{ env.NOTIFICATION_EMAIL }} ParameterKey=ArtifactsBucket,ParameterValue=${{ env.ARTIFACTS_BUCKET }} ParameterKey=GrafanaUser1Id,ParameterValue=b1738dea-8051-707d-472d-cf6e504f2627 ParameterKey=GrafanaUser2Id,ParameterValue=71239d8a-b011-707c-a5a0-d56fc0d04462"
+          if [ "$STACK_STATUS" = "DOES_NOT_EXIST" ] || [ "$STACK_STATUS" = "DELETE_COMPLETE" ]; then
+            aws cloudformation create-stack \
+              --stack-name production-grafana-v2 \
+              --template-body file://cloudformation/grafana/grafana-workspace.yaml \
+              --region ${{ env.AWS_REGION }} \
+              --parameters $PARAMS \
+              --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+              --disable-rollback
+            aws cloudformation wait stack-create-complete \
+              --stack-name production-grafana-v2 \
+              --region ${{ env.AWS_REGION }}
+          elif [ "$STACK_STATUS" = "CREATE_FAILED" ] || [ "$STACK_STATUS" = "ROLLBACK_COMPLETE" ]; then
+            aws cloudformation delete-stack --stack-name production-grafana-v2 --region ${{ env.AWS_REGION }}
+            aws cloudformation wait stack-delete-complete --stack-name production-grafana-v2 --region ${{ env.AWS_REGION }}
+            aws cloudformation create-stack \
+              --stack-name production-grafana-v2 \
+              --template-body file://cloudformation/grafana/grafana-workspace.yaml \
+              --region ${{ env.AWS_REGION }} \
+              --parameters $PARAMS \
+              --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+              --disable-rollback
+            aws cloudformation wait stack-create-complete \
+              --stack-name production-grafana-v2 \
+              --region ${{ env.AWS_REGION }}
+          else
+            aws cloudformation update-stack \
+              --stack-name production-grafana-v2 \
+              --template-body file://cloudformation/grafana/grafana-workspace.yaml \
+              --region ${{ env.AWS_REGION }} \
+              --parameters $PARAMS \
+              --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM || echo "No changes"
+            aws cloudformation wait stack-update-complete \
+              --stack-name production-grafana-v2 \
+              --region ${{ env.AWS_REGION }} 2>/dev/null || true
+          fi
+
+      - name: Assign SSO users
+        run: |
+          WORKSPACE_ID=$(aws ssm get-parameter \
+            --name "/observability/production/grafana-workspace-id" \
+            --region ${{ env.AWS_REGION }} \
+            --query "Parameter.Value" --output text)
+          aws grafana update-permissions \
+            --workspace-id $WORKSPACE_ID \
+            --update-instruction-batch \
+              "action=ADD,role=ADMIN,users=[{id=b1738dea-8051-707d-472d-cf6e504f2627,type=SSO_USER},{id=71239d8a-b011-707c-a5a0-d56fc0d04462,type=SSO_USER}]" \
+            --region ${{ env.AWS_REGION }}
+          echo "SSO users assigned"
 
       - name: Deploy CloudWatch stack
         run: |
-          aws cloudformation deploy \
-            --template-file cloudformation/cloudwatch/cloudwatch-observability.yaml \
+          STACK_STATUS=$(aws cloudformation describe-stacks \
             --stack-name production-cloudwatch-observability \
             --region ${{ env.AWS_REGION }} \
-            --parameter-overrides \
-              EnvironmentName=${{ env.ENVIRONMENT }} \
-              ApplicationName=myapp \
-            --capabilities CAPABILITY_IAM \
-            --no-fail-on-empty-changeset
-          echo "CloudWatch stack deployed"
+            --query "Stacks[0].StackStatus" \
+            --output text 2>/dev/null || echo "DOES_NOT_EXIST")
+          if [ "$STACK_STATUS" = "DOES_NOT_EXIST" ] || [ "$STACK_STATUS" = "DELETE_COMPLETE" ]; then
+            aws cloudformation create-stack \
+              --stack-name production-cloudwatch-observability \
+              --template-body file://cloudformation/cloudwatch/cloudwatch-observability.yaml \
+              --region ${{ env.AWS_REGION }} \
+              --parameters \
+                ParameterKey=EnvironmentName,ParameterValue=${{ env.ENVIRONMENT }} \
+                ParameterKey=ApplicationName,ParameterValue=myapp \
+              --capabilities CAPABILITY_IAM
+            aws cloudformation wait stack-create-complete \
+              --stack-name production-cloudwatch-observability \
+              --region ${{ env.AWS_REGION }}
+          else
+            aws cloudformation update-stack \
+              --stack-name production-cloudwatch-observability \
+              --template-body file://cloudformation/cloudwatch/cloudwatch-observability.yaml \
+              --region ${{ env.AWS_REGION }} \
+              --parameters \
+                ParameterKey=EnvironmentName,ParameterValue=${{ env.ENVIRONMENT }} \
+                ParameterKey=ApplicationName,ParameterValue=myapp \
+              --capabilities CAPABILITY_IAM || echo "No changes"
+            aws cloudformation wait stack-update-complete \
+              --stack-name production-cloudwatch-observability \
+              --region ${{ env.AWS_REGION }} 2>/dev/null || true
+          fi
 
       - name: Print Grafana URL
         run: |
