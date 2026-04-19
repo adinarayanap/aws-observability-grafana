@@ -3,76 +3,94 @@ name: Deploy Grafana Dashboards and Alerts
 on:
   push:
     branches: [main]
-    paths: ["grafana/**"]
+    paths:
+      - 'grafana/dashboards/**'
+      - 'grafana/alerts/**'
+      - 'grafana/notification-templates/**'
+      - '.github/workflows/deploy-grafana-content.yml'
   workflow_dispatch:
-    inputs:
-      environment:
-        description: Environment
-        default: production
-        type: choice
-        options: [production, staging]
 
 permissions:
   id-token: write
   contents: read
 
 env:
-  AWS_REGION: ${{ secrets.AWS_REGION }}
-  ENVIRONMENT: ${{ github.event.inputs.environment || 'production' }}
+  AWS_REGION: us-east-1
 
 jobs:
   deploy:
+    name: Deploy Grafana Content
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Configure AWS credentials
+      - name: Configure AWS via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/${{ env.ENVIRONMENT }}-github-actions-deploy-role
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/production-GitHubActionsRole
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Get Grafana workspace info
-        id: info
+      - name: Get Grafana workspace details
         run: |
-          WS_ID=$(aws ssm get-parameter \
-            --name "/observability/${{ env.ENVIRONMENT }}/grafana-workspace-id" \
-            --query "Parameter.Value" --output text \
-            --region ${{ env.AWS_REGION }} 2>/dev/null \
-            || echo "${{ secrets.GRAFANA_WORKSPACE_ID }}")
-          ENDPOINT=$(aws grafana describe-workspace \
-            --workspace-id "$WS_ID" \
+          WORKSPACE_ID=$(aws ssm get-parameter \
+            --name "/observability/production/grafana-workspace-id" \
             --region ${{ env.AWS_REGION }} \
-            --query "workspace.endpoint" --output text)
+            --query "Parameter.Value" --output text)
+          echo "WORKSPACE_ID=$WORKSPACE_ID" >> $GITHUB_ENV
+          echo "GRAFANA_URL=https://${WORKSPACE_ID}.grafana-workspace.${{ env.AWS_REGION }}.amazonaws.com" >> $GITHUB_ENV
+          echo "Workspace: $WORKSPACE_ID"
+
+      - name: Create Grafana API key
+        run: |
           API_KEY=$(aws grafana create-workspace-api-key \
-            --workspace-id "$WS_ID" \
-            --key-name "gha-${{ github.run_id }}" \
+            --workspace-id ${{ env.WORKSPACE_ID }} \
+            --key-name "deploy-${{ github.run_id }}" \
             --key-role ADMIN \
-            --seconds-to-live 600 \
+            --seconds-to-live 300 \
             --region ${{ env.AWS_REGION }} \
             --query "key" --output text)
-          echo "::add-mask::$API_KEY"
-          echo "ws_id=$WS_ID" >> $GITHUB_OUTPUT
-          echo "url=https://$ENDPOINT" >> $GITHUB_OUTPUT
-          echo "api_key=$API_KEY" >> $GITHUB_OUTPUT
+          echo "GRAFANA_API_KEY=$API_KEY" >> $GITHUB_ENV
+          echo "API key created"
 
-      - name: Deploy dashboards
+      - name: Deploy all dashboards
         run: |
-          for f in grafana/dashboards/*.json; do
-            PAYLOAD=$(jq -n --argjson d "$(cat $f)" \
-              '{dashboard:$d,overwrite:true,folderId:0}')
-            curl -sf -X POST \
-              -H "Authorization: Bearer ${{ steps.info.outputs.api_key }}" \
+          for file in grafana/dashboards/*.json; do
+            echo "Deploying: $file"
+            RESPONSE=$(curl -sf -X POST \
+              -H "Authorization: Bearer ${{ env.GRAFANA_API_KEY }}" \
               -H "Content-Type: application/json" \
-              -d "$PAYLOAD" \
-              "${{ steps.info.outputs.url }}/api/dashboards/import" || true
-            echo "Deployed: $f"
+              -d "{\"dashboard\": $(cat $file), \"overwrite\": true, \"folderId\": 0}" \
+              "${{ env.GRAFANA_URL }}/api/dashboards/import")
+            echo "Result: $RESPONSE"
           done
+          echo "All dashboards deployed"
 
-      - name: Cleanup API key
+      - name: Create server down alert
+        run: |
+          # Create folder first
+          curl -sf -X POST \
+            -H "Authorization: Bearer ${{ env.GRAFANA_API_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d '{"title": "Platform Alerts", "uid": "platform-alerts"}' \
+            "${{ env.GRAFANA_URL }}/api/folders" || true
+
+          # Deploy alert rule
+          curl -sf -X POST \
+            -H "Authorization: Bearer ${{ env.GRAFANA_API_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d @grafana/alerts/alert-rules.json \
+            "${{ env.GRAFANA_URL }}/api/v1/provisioning/alert-rules" || true
+          echo "Alert rules deployed"
+
+      - name: Delete Grafana API key
         if: always()
         run: |
           aws grafana delete-workspace-api-key \
-            --workspace-id "${{ steps.info.outputs.ws_id }}" \
-            --key-name "gha-${{ github.run_id }}" \
+            --workspace-id ${{ env.WORKSPACE_ID }} \
+            --key-name "deploy-${{ github.run_id }}" \
             --region ${{ env.AWS_REGION }} || true
+          echo "API key deleted"
+
+      - name: Print dashboard URL
+        run: |
+          echo "Dashboard: ${{ env.GRAFANA_URL }}/d/aws-infra-v1"

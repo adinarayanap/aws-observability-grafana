@@ -1,74 +1,70 @@
 {
-  "name": "AWS Observability Alerts",
-  "interval": "1m",
-  "rules": [
+  "uid": "server-down-rule",
+  "title": "Server Down - EC2 Status Check Failed",
+  "condition": "C",
+  "data": [
     {
-      "uid": "alert-high-cpu",
-      "title": "High CPU Utilization",
-      "condition": "C",
-      "for": "5m",
-      "labels": {"severity":"warning","service":"ec2","team":"platform"},
-      "annotations": {
-        "summary": "High CPU detected",
-        "description": "EC2 CPU exceeded 80% for 5 minutes. Value: {{ $values.A }}%"
-      },
-      "data": [
-        {"refId":"A","datasourceUid":"${CLOUDWATCH_DS_UID}",
-         "model":{"namespace":"AWS/EC2","metricName":"CPUUtilization","statistic":"Average","period":"300","dimensions":{}}},
-        {"refId":"C","datasourceUid":"-100",
-         "model":{"type":"classic_conditions","conditions":[{"evaluator":{"type":"gt","params":[80]},"query":{"params":["A"]},"reducer":{"type":"last"}}]}}
-      ]
+      "refId": "A",
+      "datasourceUid": "default",
+      "queryType": "",
+      "relativeTimeRange": {"from": 300, "to": 0},
+      "model": {
+        "datasource": {"type": "cloudwatch", "uid": "default"},
+        "dimensions": {},
+        "metricName": "StatusCheckFailed",
+        "namespace": "AWS/EC2",
+        "period": "60",
+        "queryMode": "Metrics",
+        "refId": "A",
+        "region": "us-east-1",
+        "statistic": "Maximum"
+      }
     },
     {
-      "uid": "alert-high-memory",
-      "title": "High Memory Utilization",
-      "condition": "C",
-      "for": "5m",
-      "labels": {"severity":"warning","service":"ec2","team":"platform"},
-      "annotations": {
-        "summary": "High memory detected",
-        "description": "Memory exceeded 85% for 5 minutes. Value: {{ $values.A }}%"
-      },
-      "data": [
-        {"refId":"A","datasourceUid":"${CLOUDWATCH_DS_UID}",
-         "model":{"namespace":"CWAgent","metricName":"mem_used_percent","statistic":"Average","period":"300","dimensions":{}}},
-        {"refId":"C","datasourceUid":"-100",
-         "model":{"type":"classic_conditions","conditions":[{"evaluator":{"type":"gt","params":[85]},"query":{"params":["A"]},"reducer":{"type":"last"}}]}}
-      ]
+      "refId": "B",
+      "datasourceUid": "__expr__",
+      "relativeTimeRange": {"from": 300, "to": 0},
+      "model": {
+        "type": "reduce",
+        "datasource": {"type": "__expr__", "uid": "__expr__"},
+        "expression": "A",
+        "reducer": "last",
+        "refId": "B"
+      }
     },
     {
-      "uid": "alert-high-errors",
-      "title": "High Application Error Rate",
-      "condition": "C",
-      "for": "2m",
-      "labels": {"severity":"critical","service":"myapp","team":"application"},
-      "annotations": {
-        "summary": "Application error rate critically high",
-        "description": "Error count exceeded 5/5min. Count: {{ $values.A }}"
-      },
-      "data": [
-        {"refId":"A","datasourceUid":"${CLOUDWATCH_DS_UID}",
-         "model":{"namespace":"Custom/production/Application","metricName":"myappErrorCount","statistic":"Sum","period":"300","dimensions":{}}},
-        {"refId":"C","datasourceUid":"-100",
-         "model":{"type":"classic_conditions","conditions":[{"evaluator":{"type":"gt","params":[5]},"query":{"params":["A"]},"reducer":{"type":"last"}}]}}
-      ]
-    },
-    {
-      "uid": "alert-alb-5xx",
-      "title": "ALB 5xx Error Spike",
-      "condition": "C",
-      "for": "3m",
-      "labels": {"severity":"critical","service":"alb","team":"platform"},
-      "annotations": {
-        "summary": "ALB returning 5xx errors",
-        "description": "ALB 5xx count exceeded 10 for 3 consecutive minutes"
-      },
-      "data": [
-        {"refId":"A","datasourceUid":"${CLOUDWATCH_DS_UID}",
-         "model":{"namespace":"AWS/ApplicationELB","metricName":"HTTPCode_Target_5XX_Count","statistic":"Sum","period":"60","dimensions":{}}},
-        {"refId":"C","datasourceUid":"-100",
-         "model":{"type":"classic_conditions","conditions":[{"evaluator":{"type":"gt","params":[10]},"query":{"params":["A"]},"reducer":{"type":"sum"}}]}}
-      ]
+      "refId": "C",
+      "datasourceUid": "__expr__",
+      "relativeTimeRange": {"from": 300, "to": 0},
+      "model": {
+        "type": "threshold",
+        "datasource": {"type": "__expr__", "uid": "__expr__"},
+        "expression": "B",
+        "refId": "C",
+        "conditions": [{
+          "evaluator": {"type": "gt", "params": [0]},
+          "operator": {"type": "and"},
+          "query": {"params": ["B"]},
+          "reducer": {"type": "last"}
+        }]
+      }
     }
-  ]
+  ],
+  "intervalSeconds": 60,
+  "is_paused": false,
+  "for": "2m",
+  "annotations": {
+    "description": "EC2 instance status check failed for 2 consecutive minutes.",
+    "runbook_url": "https://github.com/adinarayanap/aws-observability-grafana/blob/main/docs/runbooks/server-down.md",
+    "summary": "SERVER IS DOWN - EC2 status check failed"
+  },
+  "labels": {
+    "severity": "critical",
+    "team": "platform",
+    "service": "ec2"
+  },
+  "folderUID": "platform-alerts",
+  "ruleGroup": "server-alerts",
+  "noDataState": "Alerting",
+  "execErrState": "Alerting"
 }
