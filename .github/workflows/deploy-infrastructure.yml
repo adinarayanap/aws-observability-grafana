@@ -6,7 +6,6 @@ on:
     paths:
       - 'cloudformation/**'
       - 'lambda/**'
-      - 'grafana/**'
       - '.github/workflows/deploy-infrastructure.yml'
   workflow_dispatch:
 
