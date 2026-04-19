@@ -41,11 +41,12 @@
           "period": "60",
           "region": "us-east-1",
           "dimensions": {
-            "InstanceId": [
-              "i-077303b3f359f50a5"
-            ]
+            "InstanceId": "i-077303b3f359f50a5"
           },
-          "matchExact": true
+          "matchExact": true,
+          "alias": "",
+          "metricQueryType": 0,
+          "metricEditorMode": 0
         }
       ],
       "fieldConfig": {
@@ -101,11 +102,12 @@
           "period": "60",
           "region": "us-east-1",
           "dimensions": {
-            "InstanceId": [
-              "i-077303b3f359f50a5"
-            ]
+            "InstanceId": "i-077303b3f359f50a5"
           },
-          "matchExact": true
+          "matchExact": true,
+          "alias": "",
+          "metricQueryType": 0,
+          "metricEditorMode": 0
         }
       ],
       "fieldConfig": {
@@ -161,12 +163,12 @@
           "period": "60",
           "region": "us-east-1",
           "dimensions": {
-            "InstanceId": [
-              "i-077303b3f359f50a5"
-            ]
+            "InstanceId": "i-077303b3f359f50a5"
           },
           "matchExact": true,
-          "alias": "Avg CPU"
+          "alias": "Avg CPU",
+          "metricQueryType": 0,
+          "metricEditorMode": 0
         },
         {
           "refId": "B",
@@ -181,12 +183,12 @@
           "period": "60",
           "region": "us-east-1",
           "dimensions": {
-            "InstanceId": [
-              "i-077303b3f359f50a5"
-            ]
+            "InstanceId": "i-077303b3f359f50a5"
           },
           "matchExact": true,
-          "alias": "Max CPU"
+          "alias": "Max CPU",
+          "metricQueryType": 0,
+          "metricEditorMode": 0
         }
       ]
     },
@@ -218,12 +220,12 @@
           "period": "60",
           "region": "us-east-1",
           "dimensions": {
-            "LoadBalancer": [
-              "app/production-monitoring-alb/698c6d9914281ee1"
-            ]
+            "LoadBalancer": "app/production-monitoring-alb/698c6d9914281ee1"
           },
           "matchExact": true,
-          "alias": "Requests"
+          "alias": "Requests",
+          "metricQueryType": 0,
+          "metricEditorMode": 0
         },
         {
           "refId": "B",
@@ -238,12 +240,12 @@
           "period": "60",
           "region": "us-east-1",
           "dimensions": {
-            "LoadBalancer": [
-              "app/production-monitoring-alb/698c6d9914281ee1"
-            ]
+            "LoadBalancer": "app/production-monitoring-alb/698c6d9914281ee1"
           },
           "matchExact": true,
-          "alias": "5xx Errors"
+          "alias": "5xx",
+          "metricQueryType": 0,
+          "metricEditorMode": 0
         }
       ]
     },
@@ -275,12 +277,12 @@
           "period": "60",
           "region": "us-east-1",
           "dimensions": {
-            "DBInstanceIdentifier": [
-              "production-monitoring-db"
-            ]
+            "DBInstanceIdentifier": "production-monitoring-db"
           },
           "matchExact": true,
-          "alias": "Connections"
+          "alias": "Connections",
+          "metricQueryType": 0,
+          "metricEditorMode": 0
         }
       ]
     },
@@ -312,11 +314,12 @@
           "period": "60",
           "region": "us-east-1",
           "dimensions": {
-            "InstanceId": [
-              "i-077303b3f359f50a5"
-            ]
+            "InstanceId": "i-077303b3f359f50a5"
           },
-          "matchExact": true
+          "matchExact": true,
+          "alias": "",
+          "metricQueryType": 0,
+          "metricEditorMode": 0
         }
       ],
       "options": {
