@@ -9,7 +9,7 @@
     "cloudwatch"
   ],
   "time": {
-    "from": "now-3h",
+    "from": "now-1h",
     "to": "now"
   },
   "panels": [
@@ -28,11 +28,16 @@
       },
       "targets": [
         {
+          "refId": "A",
+          "queryMode": "Metrics",
           "namespace": "AWS/EC2",
           "metricName": "CPUUtilization",
           "statistic": "Average",
-          "period": "300",
-          "refId": "A"
+          "period": "60",
+          "region": "us-east-1",
+          "dimensions": {
+            "InstanceId": "i-077303b3f359f50a5"
+          }
         }
       ],
       "fieldConfig": {
@@ -43,7 +48,8 @@
           "thresholds": {
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "yellow",
@@ -73,11 +79,16 @@
       },
       "targets": [
         {
+          "refId": "A",
+          "queryMode": "Metrics",
           "namespace": "CWAgent",
           "metricName": "mem_used_percent",
           "statistic": "Average",
-          "period": "300",
-          "refId": "A"
+          "period": "60",
+          "region": "us-east-1",
+          "dimensions": {
+            "InstanceId": "i-077303b3f359f50a5"
+          }
         }
       ],
       "fieldConfig": {
@@ -88,7 +99,8 @@
           "thresholds": {
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "yellow",
@@ -118,25 +130,37 @@
       },
       "targets": [
         {
+          "refId": "A",
+          "queryMode": "Metrics",
           "namespace": "AWS/EC2",
           "metricName": "CPUUtilization",
           "statistic": "Average",
-          "period": "300",
-          "refId": "A"
+          "period": "60",
+          "region": "us-east-1",
+          "dimensions": {
+            "InstanceId": "i-077303b3f359f50a5"
+          },
+          "alias": "Avg CPU"
         },
         {
+          "refId": "B",
+          "queryMode": "Metrics",
           "namespace": "AWS/EC2",
           "metricName": "CPUUtilization",
           "statistic": "Maximum",
-          "period": "300",
-          "refId": "B"
+          "period": "60",
+          "region": "us-east-1",
+          "dimensions": {
+            "InstanceId": "i-077303b3f359f50a5"
+          },
+          "alias": "Max CPU"
         }
       ]
     },
     {
       "id": 4,
       "type": "timeseries",
-      "title": "ALB Status Codes",
+      "title": "ALB Request Count",
       "gridPos": {
         "h": 7,
         "w": 12,
@@ -148,25 +172,30 @@
       },
       "targets": [
         {
+          "refId": "A",
+          "queryMode": "Metrics",
           "namespace": "AWS/ApplicationELB",
-          "metricName": "HTTPCode_Target_2XX_Count",
+          "metricName": "RequestCount",
           "statistic": "Sum",
           "period": "60",
-          "refId": "A"
+          "region": "us-east-1",
+          "dimensions": {
+            "LoadBalancer": "app/production-monitoring-alb/698c6d9914281ee1"
+          },
+          "alias": "Requests"
         },
         {
-          "namespace": "AWS/ApplicationELB",
-          "metricName": "HTTPCode_Target_4XX_Count",
-          "statistic": "Sum",
-          "period": "60",
-          "refId": "B"
-        },
-        {
+          "refId": "B",
+          "queryMode": "Metrics",
           "namespace": "AWS/ApplicationELB",
           "metricName": "HTTPCode_Target_5XX_Count",
           "statistic": "Sum",
           "period": "60",
-          "refId": "C"
+          "region": "us-east-1",
+          "dimensions": {
+            "LoadBalancer": "app/production-monitoring-alb/698c6d9914281ee1"
+          },
+          "alias": "5xx Errors"
         }
       ]
     },
@@ -185,23 +214,29 @@
       },
       "targets": [
         {
+          "refId": "A",
+          "queryMode": "Metrics",
           "namespace": "AWS/RDS",
           "metricName": "DatabaseConnections",
           "statistic": "Average",
-          "period": "300",
-          "refId": "A"
+          "period": "60",
+          "region": "us-east-1",
+          "dimensions": {
+            "DBInstanceIdentifier": "production-monitoring-db"
+          },
+          "alias": "Connections"
         }
       ]
     },
     {
-      "id": 10,
+      "id": 6,
       "type": "stat",
       "title": "Server Down Status",
       "gridPos": {
         "h": 5,
         "w": 6,
         "x": 0,
-        "y": 20
+        "y": 13
       },
       "datasource": {
         "type": "cloudwatch"
@@ -214,7 +249,10 @@
           "metricName": "StatusCheckFailed",
           "statistic": "Maximum",
           "period": "60",
-          "region": "us-east-1"
+          "region": "us-east-1",
+          "dimensions": {
+            "InstanceId": "i-077303b3f359f50a5"
+          }
         }
       ],
       "options": {
@@ -227,16 +265,17 @@
       },
       "fieldConfig": {
         "defaults": {
-          "displayName": "Server Status",
           "mappings": [
             {
               "type": "value",
               "options": {
                 "0": {
-                  "text": "UP"
+                  "text": "UP",
+                  "color": "green"
                 },
                 "1": {
-                  "text": "DOWN"
+                  "text": "DOWN",
+                  "color": "red"
                 }
               }
             }
@@ -250,6 +289,64 @@
               {
                 "color": "red",
                 "value": 1
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "RDS Status",
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 6,
+        "y": 13
+      },
+      "datasource": {
+        "type": "cloudwatch"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryMode": "Metrics",
+          "namespace": "AWS/RDS",
+          "metricName": "DatabaseConnections",
+          "statistic": "Average",
+          "period": "60",
+          "region": "us-east-1",
+          "dimensions": {
+            "DBInstanceIdentifier": "production-monitoring-db"
+          }
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "displayName": "DB Connections",
+          "thresholds": {
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 10
+              },
+              {
+                "color": "red",
+                "value": 50
               }
             ]
           }
