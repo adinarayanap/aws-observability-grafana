@@ -116,6 +116,11 @@ jobs:
 
       - name: Deploy CloudWatch stack
         run: |
+          SNS_ARN=$(aws ssm get-parameter \
+            --name "/observability/production/sns-topic-arn" \
+            --region ${{ env.AWS_REGION }} \
+            --query "Parameter.Value" --output text)
+          echo "SNS ARN: $SNS_ARN"
           STACK_STATUS=$(aws cloudformation describe-stacks \
             --stack-name production-cloudwatch-observability \
             --region ${{ env.AWS_REGION }} \
@@ -129,6 +134,7 @@ jobs:
               --parameters \
                 ParameterKey=EnvironmentName,ParameterValue=${{ env.ENVIRONMENT }} \
                 ParameterKey=ApplicationName,ParameterValue=myapp \
+                ParameterKey=AlertSNSTopicArn,ParameterValue=$SNS_ARN \
               --capabilities CAPABILITY_IAM
             aws cloudformation wait stack-create-complete \
               --stack-name production-cloudwatch-observability \
@@ -141,6 +147,7 @@ jobs:
               --parameters \
                 ParameterKey=EnvironmentName,ParameterValue=${{ env.ENVIRONMENT }} \
                 ParameterKey=ApplicationName,ParameterValue=myapp \
+                ParameterKey=AlertSNSTopicArn,ParameterValue=$SNS_ARN \
               --capabilities CAPABILITY_IAM || echo "No changes"
             aws cloudformation wait stack-update-complete \
               --stack-name production-cloudwatch-observability \
