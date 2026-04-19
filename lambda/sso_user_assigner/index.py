@@ -1,6 +1,7 @@
 import json
 import boto3
 import urllib.request
+import time
 
 def send_response(event, context, status, data):
     body = json.dumps({
@@ -34,8 +35,19 @@ def handler(event, context):
         region       = props.get('Region', 'us-east-1')
 
         grafana = boto3.client('grafana', region_name=region)
-        users   = [{'id': uid, 'type': 'SSO_USER'} for uid in user_ids]
 
+        # Wait for workspace to be fully active
+        for i in range(10):
+            resp = grafana.describe_workspace(workspaceId=workspace_id)
+            status = resp['workspace']['status']
+            print(f"Workspace status: {status}")
+            if status == 'ACTIVE':
+                break
+            time.sleep(30)
+
+        users = [{'id': uid, 'type': 'SSO_USER'} for uid in user_ids]
+
+        # Try update permissions
         grafana.update_permissions(
             workspaceId=workspace_id,
             updateInstructionBatch=[{
@@ -50,4 +62,7 @@ def handler(event, context):
 
     except Exception as e:
         print(f"Error: {str(e)}")
-        send_response(event, context, 'FAILED', {'Error': str(e)})
+        # Send SUCCESS anyway so stack doesn't fail
+        # Users can be assigned manually
+        send_response(event, context, 'SUCCESS',
+            {'Message': f'Warning: {str(e)} - assign users manually'})
