@@ -24,11 +24,16 @@
         "y": 0
       },
       "datasource": {
-        "type": "cloudwatch"
+        "type": "cloudwatch",
+        "uid": "efjjqjppp5gjkb"
       },
       "targets": [
         {
           "refId": "A",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "efjjqjppp5gjkb"
+          },
           "queryMode": "Metrics",
           "namespace": "AWS/EC2",
           "metricName": "CPUUtilization",
@@ -36,8 +41,11 @@
           "period": "60",
           "region": "us-east-1",
           "dimensions": {
-            "InstanceId": "i-077303b3f359f50a5"
-          }
+            "InstanceId": [
+              "i-077303b3f359f50a5"
+            ]
+          },
+          "matchExact": true
         }
       ],
       "fieldConfig": {
@@ -46,6 +54,7 @@
           "max": 100,
           "unit": "percent",
           "thresholds": {
+            "mode": "absolute",
             "steps": [
               {
                 "color": "green",
@@ -75,11 +84,16 @@
         "y": 0
       },
       "datasource": {
-        "type": "cloudwatch"
+        "type": "cloudwatch",
+        "uid": "efjjqjppp5gjkb"
       },
       "targets": [
         {
           "refId": "A",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "efjjqjppp5gjkb"
+          },
           "queryMode": "Metrics",
           "namespace": "CWAgent",
           "metricName": "mem_used_percent",
@@ -87,8 +101,11 @@
           "period": "60",
           "region": "us-east-1",
           "dimensions": {
-            "InstanceId": "i-077303b3f359f50a5"
-          }
+            "InstanceId": [
+              "i-077303b3f359f50a5"
+            ]
+          },
+          "matchExact": true
         }
       ],
       "fieldConfig": {
@@ -97,6 +114,7 @@
           "max": 100,
           "unit": "percent",
           "thresholds": {
+            "mode": "absolute",
             "steps": [
               {
                 "color": "green",
@@ -126,11 +144,16 @@
         "y": 0
       },
       "datasource": {
-        "type": "cloudwatch"
+        "type": "cloudwatch",
+        "uid": "efjjqjppp5gjkb"
       },
       "targets": [
         {
           "refId": "A",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "efjjqjppp5gjkb"
+          },
           "queryMode": "Metrics",
           "namespace": "AWS/EC2",
           "metricName": "CPUUtilization",
@@ -138,12 +161,19 @@
           "period": "60",
           "region": "us-east-1",
           "dimensions": {
-            "InstanceId": "i-077303b3f359f50a5"
+            "InstanceId": [
+              "i-077303b3f359f50a5"
+            ]
           },
+          "matchExact": true,
           "alias": "Avg CPU"
         },
         {
           "refId": "B",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "efjjqjppp5gjkb"
+          },
           "queryMode": "Metrics",
           "namespace": "AWS/EC2",
           "metricName": "CPUUtilization",
@@ -151,8 +181,11 @@
           "period": "60",
           "region": "us-east-1",
           "dimensions": {
-            "InstanceId": "i-077303b3f359f50a5"
+            "InstanceId": [
+              "i-077303b3f359f50a5"
+            ]
           },
+          "matchExact": true,
           "alias": "Max CPU"
         }
       ]
@@ -168,11 +201,16 @@
         "y": 6
       },
       "datasource": {
-        "type": "cloudwatch"
+        "type": "cloudwatch",
+        "uid": "efjjqjppp5gjkb"
       },
       "targets": [
         {
           "refId": "A",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "efjjqjppp5gjkb"
+          },
           "queryMode": "Metrics",
           "namespace": "AWS/ApplicationELB",
           "metricName": "RequestCount",
@@ -180,12 +218,19 @@
           "period": "60",
           "region": "us-east-1",
           "dimensions": {
-            "LoadBalancer": "app/production-monitoring-alb/698c6d9914281ee1"
+            "LoadBalancer": [
+              "app/production-monitoring-alb/698c6d9914281ee1"
+            ]
           },
+          "matchExact": true,
           "alias": "Requests"
         },
         {
           "refId": "B",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "efjjqjppp5gjkb"
+          },
           "queryMode": "Metrics",
           "namespace": "AWS/ApplicationELB",
           "metricName": "HTTPCode_Target_5XX_Count",
@@ -193,8 +238,11 @@
           "period": "60",
           "region": "us-east-1",
           "dimensions": {
-            "LoadBalancer": "app/production-monitoring-alb/698c6d9914281ee1"
+            "LoadBalancer": [
+              "app/production-monitoring-alb/698c6d9914281ee1"
+            ]
           },
+          "matchExact": true,
           "alias": "5xx Errors"
         }
       ]
@@ -210,11 +258,16 @@
         "y": 6
       },
       "datasource": {
-        "type": "cloudwatch"
+        "type": "cloudwatch",
+        "uid": "efjjqjppp5gjkb"
       },
       "targets": [
         {
           "refId": "A",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "efjjqjppp5gjkb"
+          },
           "queryMode": "Metrics",
           "namespace": "AWS/RDS",
           "metricName": "DatabaseConnections",
@@ -222,8 +275,11 @@
           "period": "60",
           "region": "us-east-1",
           "dimensions": {
-            "DBInstanceIdentifier": "production-monitoring-db"
+            "DBInstanceIdentifier": [
+              "production-monitoring-db"
+            ]
           },
+          "matchExact": true,
           "alias": "Connections"
         }
       ]
@@ -239,11 +295,16 @@
         "y": 13
       },
       "datasource": {
-        "type": "cloudwatch"
+        "type": "cloudwatch",
+        "uid": "efjjqjppp5gjkb"
       },
       "targets": [
         {
           "refId": "A",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "efjjqjppp5gjkb"
+          },
           "queryMode": "Metrics",
           "namespace": "AWS/EC2",
           "metricName": "StatusCheckFailed",
@@ -251,8 +312,11 @@
           "period": "60",
           "region": "us-east-1",
           "dimensions": {
-            "InstanceId": "i-077303b3f359f50a5"
-          }
+            "InstanceId": [
+              "i-077303b3f359f50a5"
+            ]
+          },
+          "matchExact": true
         }
       ],
       "options": {
@@ -261,7 +325,8 @@
             "lastNotNull"
           ]
         },
-        "colorMode": "background"
+        "colorMode": "background",
+        "graphMode": "none"
       },
       "fieldConfig": {
         "defaults": {
@@ -271,16 +336,19 @@
               "options": {
                 "0": {
                   "text": "UP",
-                  "color": "green"
+                  "color": "green",
+                  "index": 0
                 },
                 "1": {
                   "text": "DOWN",
-                  "color": "red"
+                  "color": "red",
+                  "index": 1
                 }
               }
             }
           ],
           "thresholds": {
+            "mode": "absolute",
             "steps": [
               {
                 "color": "green",
@@ -289,64 +357,6 @@
               {
                 "color": "red",
                 "value": 1
-              }
-            ]
-          }
-        }
-      }
-    },
-    {
-      "id": 7,
-      "type": "stat",
-      "title": "RDS Status",
-      "gridPos": {
-        "h": 5,
-        "w": 6,
-        "x": 6,
-        "y": 13
-      },
-      "datasource": {
-        "type": "cloudwatch"
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "queryMode": "Metrics",
-          "namespace": "AWS/RDS",
-          "metricName": "DatabaseConnections",
-          "statistic": "Average",
-          "period": "60",
-          "region": "us-east-1",
-          "dimensions": {
-            "DBInstanceIdentifier": "production-monitoring-db"
-          }
-        }
-      ],
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ]
-        },
-        "colorMode": "background"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "displayName": "DB Connections",
-          "thresholds": {
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 10
-              },
-              {
-                "color": "red",
-                "value": 50
               }
             ]
           }
