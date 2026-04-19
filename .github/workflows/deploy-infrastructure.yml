@@ -153,6 +153,42 @@ jobs:
               --region ${{ env.AWS_REGION }} 2>/dev/null || true
           fi
 
+
+      - name: Deploy monitoring infrastructure (EC2, ALB, RDS)
+        run: |
+          STACK_STATUS=$(aws cloudformation describe-stacks \
+            --stack-name production-monitoring-infra \
+            --region ${{ env.AWS_REGION }} \
+            --query "Stacks[0].StackStatus" \
+            --output text 2>/dev/null || echo "DOES_NOT_EXIST")
+          echo "Monitoring infra status: $STACK_STATUS"
+
+          if [ "$STACK_STATUS" = "DOES_NOT_EXIST" ] || [ "$STACK_STATUS" = "DELETE_COMPLETE" ]; then
+            aws cloudformation create-stack \
+              --stack-name production-monitoring-infra \
+              --template-body file://cloudformation/ec2/monitoring-infrastructure.yaml \
+              --region ${{ env.AWS_REGION }} \
+              --parameters \
+                ParameterKey=EnvironmentName,ParameterValue=${{ env.ENVIRONMENT }} \
+              --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM
+            echo "Monitoring infra stack creating..."
+            aws cloudformation wait stack-create-complete \
+              --stack-name production-monitoring-infra \
+              --region ${{ env.AWS_REGION }}
+          else
+            aws cloudformation update-stack \
+              --stack-name production-monitoring-infra \
+              --template-body file://cloudformation/ec2/monitoring-infrastructure.yaml \
+              --region ${{ env.AWS_REGION }} \
+              --parameters \
+                ParameterKey=EnvironmentName,ParameterValue=${{ env.ENVIRONMENT }} \
+              --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM || echo "No changes"
+            aws cloudformation wait stack-update-complete \
+              --stack-name production-monitoring-infra \
+              --region ${{ env.AWS_REGION }} 2>/dev/null || true
+          fi
+          echo "Monitoring infra deployed"
+
       - name: Print Grafana URL
         run: |
           WORKSPACE_ID=$(aws ssm get-parameter \
