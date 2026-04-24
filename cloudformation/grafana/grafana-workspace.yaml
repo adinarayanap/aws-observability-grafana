@@ -119,7 +119,7 @@ Resources:
       AccountAccessType: CURRENT_ACCOUNT
       AuthenticationProviders:
         - AWS_SSO
-      PermissionType: CUSTOMER_MANAGED
+      PermissionType: SERVICE_MANAGED
       RoleArn: !GetAtt GrafanaWorkspaceRole.Arn
       DataSources:
         - CLOUDWATCH
