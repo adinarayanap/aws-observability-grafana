@@ -41,7 +41,7 @@
           "period": "60",
           "region": "us-east-1",
           "dimensions": {
-            "InstanceId": "i-077303b3f359f50a5"
+            "InstanceId": "i-0be56c3d7b9ccfa3e"
           },
           "matchExact": true,
           "alias": "",
@@ -102,7 +102,7 @@
           "period": "60",
           "region": "us-east-1",
           "dimensions": {
-            "InstanceId": "i-077303b3f359f50a5"
+            "InstanceId": "i-0be56c3d7b9ccfa3e"
           },
           "matchExact": true,
           "alias": "",
@@ -163,7 +163,7 @@
           "period": "60",
           "region": "us-east-1",
           "dimensions": {
-            "InstanceId": "i-077303b3f359f50a5"
+            "InstanceId": "i-0be56c3d7b9ccfa3e"
           },
           "matchExact": true,
           "alias": "Avg CPU",
@@ -183,7 +183,7 @@
           "period": "60",
           "region": "us-east-1",
           "dimensions": {
-            "InstanceId": "i-077303b3f359f50a5"
+            "InstanceId": "i-0be56c3d7b9ccfa3e"
           },
           "matchExact": true,
           "alias": "Max CPU",
@@ -220,7 +220,7 @@
           "period": "60",
           "region": "us-east-1",
           "dimensions": {
-            "LoadBalancer": "app/production-monitoring-alb/698c6d9914281ee1"
+            "LoadBalancer": "app/production-monitoring-alb/1f7f90f8b2206abc"
           },
           "matchExact": true,
           "alias": "Requests",
@@ -240,7 +240,7 @@
           "period": "60",
           "region": "us-east-1",
           "dimensions": {
-            "LoadBalancer": "app/production-monitoring-alb/698c6d9914281ee1"
+            "LoadBalancer": "app/production-monitoring-alb/1f7f90f8b2206abc"
           },
           "matchExact": true,
           "alias": "5xx",
@@ -314,7 +314,7 @@
           "period": "60",
           "region": "us-east-1",
           "dimensions": {
-            "InstanceId": "i-077303b3f359f50a5"
+            "InstanceId": "i-0be56c3d7b9ccfa3e"
           },
           "matchExact": true,
           "alias": "",
