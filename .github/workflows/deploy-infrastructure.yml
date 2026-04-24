@@ -183,3 +183,108 @@ jobs:
           echo "Dashboard: https://${WORKSPACE_ID}.grafana-workspace.${{ env.AWS_REGION }}.amazonaws.com/d/aws-infra-v1"
           echo "ALB: http://${ALB}"
           echo "============================================"
+
+      - name: Auto-update Grafana dashboard with new instance IDs
+        run: |
+          INSTANCE_ID=$(aws ec2 describe-instances \
+            --region ${{ env.AWS_REGION }} \
+            --filters "Name=tag:Name,Values=production-monitoring-ec2" \
+                      "Name=instance-state-name,Values=running" \
+            --query "Reservations[0].Instances[0].InstanceId" \
+            --output text)
+
+          ALB_DIM=$(aws elbv2 describe-load-balancers \
+            --region ${{ env.AWS_REGION }} \
+            --query "LoadBalancers[?LoadBalancerName=='production-monitoring-alb'].LoadBalancerArn" \
+            --output text | sed 's|arn:aws:elasticloadbalancing:[^:]*:[^:]*:||')
+
+          WORKSPACE_ID=$(aws ssm get-parameter \
+            --name "/observability/production/grafana-workspace-id" \
+            --region ${{ env.AWS_REGION }} \
+            --query "Parameter.Value" --output text)
+
+          GRAFANA_URL="https://${WORKSPACE_ID}.grafana-workspace.${{ env.AWS_REGION }}.amazonaws.com"
+
+          API_KEY=$(aws grafana create-workspace-api-key \
+            --workspace-id $WORKSPACE_ID \
+            --key-name "auto-update-${{ github.run_id }}" \
+            --key-role ADMIN \
+            --seconds-to-live 300 \
+            --region ${{ env.AWS_REGION }} \
+            --query "key" --output text)
+
+          echo "Instance: $INSTANCE_ID"
+          echo "ALB: $ALB_DIM"
+
+          python3 << PYEOF
+import json
+
+instance_id = "$INSTANCE_ID"
+alb_dim     = "$ALB_DIM"
+rds_id      = "production-monitoring-db"
+ds_uid      = "efjjqjppp5gjkb"
+ds          = {"type": "cloudwatch", "uid": ds_uid}
+
+def t(ref, ns, metric, dn, dv, stat="Average", alias=""):
+    return {"refId": ref, "datasource": ds, "queryMode": "Metrics",
+            "namespace": ns, "metricName": metric, "statistic": stat,
+            "period": "60", "region": "us-east-1",
+            "dimensions": {dn: dv}, "matchExact": True,
+            "alias": alias, "metricQueryType": 0, "metricEditorMode": 0}
+
+dashboard = {
+  "title": "AWS Infrastructure Observability", "uid": "aws-infra-v1",
+  "schemaVersion": 38, "refresh": "1m",
+  "tags": ["aws","observability","cloudwatch"],
+  "time": {"from": "now-1h", "to": "now"},
+  "panels": [
+    {"id":1,"type":"gauge","title":"CPU Utilization",
+     "gridPos":{"h":6,"w":6,"x":0,"y":0},"datasource":ds,
+     "targets":[t("A","AWS/EC2","CPUUtilization","InstanceId",instance_id)],
+     "fieldConfig":{"defaults":{"min":0,"max":100,"unit":"percent",
+       "thresholds":{"mode":"absolute","steps":[{"color":"green","value":None},
+       {"color":"yellow","value":60},{"color":"red","value":80}]}}}},
+    {"id":2,"type":"gauge","title":"Memory Utilization",
+     "gridPos":{"h":6,"w":6,"x":6,"y":0},"datasource":ds,
+     "targets":[t("A","CWAgent","mem_used_percent","InstanceId",instance_id)],
+     "fieldConfig":{"defaults":{"min":0,"max":100,"unit":"percent",
+       "thresholds":{"mode":"absolute","steps":[{"color":"green","value":None},
+       {"color":"yellow","value":70},{"color":"red","value":85}]}}}},
+    {"id":3,"type":"timeseries","title":"CPU Trend",
+     "gridPos":{"h":6,"w":12,"x":12,"y":0},"datasource":ds,
+     "targets":[t("A","AWS/EC2","CPUUtilization","InstanceId",instance_id,"Average","Avg CPU"),
+                t("B","AWS/EC2","CPUUtilization","InstanceId",instance_id,"Maximum","Max CPU")]},
+    {"id":4,"type":"timeseries","title":"ALB Request Count",
+     "gridPos":{"h":7,"w":12,"x":0,"y":6},"datasource":ds,
+     "targets":[t("A","AWS/ApplicationELB","RequestCount","LoadBalancer",alb_dim,"Sum","Requests"),
+                t("B","AWS/ApplicationELB","HTTPCode_Target_5XX_Count","LoadBalancer",alb_dim,"Sum","5xx")]},
+    {"id":5,"type":"timeseries","title":"RDS Connections",
+     "gridPos":{"h":7,"w":12,"x":12,"y":6},"datasource":ds,
+     "targets":[t("A","AWS/RDS","DatabaseConnections","DBInstanceIdentifier",rds_id,"Average","Connections")]},
+    {"id":6,"type":"stat","title":"Server Down Status",
+     "gridPos":{"h":5,"w":6,"x":0,"y":13},"datasource":ds,
+     "targets":[t("A","AWS/EC2","StatusCheckFailed","InstanceId",instance_id,"Maximum")],
+     "options":{"reduceOptions":{"calcs":["lastNotNull"]},"colorMode":"background","graphMode":"none"},
+     "fieldConfig":{"defaults":{"mappings":[{"type":"value","options":{
+       "0":{"text":"UP","color":"green","index":0},
+       "1":{"text":"DOWN","color":"red","index":1}}}],
+       "thresholds":{"mode":"absolute","steps":[{"color":"green","value":None},{"color":"red","value":1}]}}}}
+  ]
+}
+
+with open("/tmp/dashboard.json", "w") as f:
+    json.dump(dashboard, f, indent=2)
+print(f"Dashboard generated for instance: {instance_id}")
+PYEOF
+
+          curl -sf -X POST \
+            -H "Authorization: Bearer $API_KEY" \
+            -H "Content-Type: application/json" \
+            -d "{\"dashboard\": $(cat /tmp/dashboard.json), \"overwrite\": true, \"folderId\": 0}" \
+            "${GRAFANA_URL}/api/dashboards/import" && \
+          echo "Dashboard auto-updated with instance: $INSTANCE_ID"
+
+          aws grafana delete-workspace-api-key \
+            --workspace-id $WORKSPACE_ID \
+            --key-name "auto-update-${{ github.run_id }}" \
+            --region ${{ env.AWS_REGION }} || true
