@@ -50,6 +50,11 @@ jobs:
             cd ../..
           done
 
+      - name: Upload dashboards to S3
+        run: |
+          aws s3 sync grafana/dashboards/ \
+            s3://${{ env.ARTIFACTS_BUCKET }}/grafana/dashboards/ --delete
+
       - name: Deploy Grafana stack
         run: |
           STATUS=$(aws cloudformation describe-stacks \
@@ -57,9 +62,8 @@ jobs:
             --region ${{ env.AWS_REGION }} \
             --query "Stacks[0].StackStatus" \
             --output text 2>/dev/null || echo "DOES_NOT_EXIST")
-
+          echo "Grafana stack status: $STATUS"
           PARAMS="ParameterKey=EnvironmentName,ParameterValue=${{ env.ENVIRONMENT }} ParameterKey=SSOOrganizationId,ParameterValue=${{ env.SSO_ORG_ID }} ParameterKey=NotificationEmail,ParameterValue=${{ env.NOTIFICATION_EMAIL }} ParameterKey=ArtifactsBucket,ParameterValue=${{ env.ARTIFACTS_BUCKET }} ParameterKey=GrafanaUser1Id,ParameterValue=b1738dea-8051-707d-472d-cf6e504f2627 ParameterKey=GrafanaUser2Id,ParameterValue=71239d8a-b011-707c-a5a0-d56fc0d04462"
-
           if [ "$STATUS" = "DOES_NOT_EXIST" ] || [ "$STATUS" = "DELETE_COMPLETE" ]; then
             aws cloudformation create-stack \
               --stack-name production-grafana-v2 \
@@ -71,11 +75,8 @@ jobs:
             aws cloudformation wait stack-create-complete \
               --stack-name production-grafana-v2 \
               --region ${{ env.AWS_REGION }}
-            echo "Grafana stack created"
           elif [ "$STATUS" = "CREATE_COMPLETE" ] || [ "$STATUS" = "UPDATE_COMPLETE" ]; then
-            echo "Grafana stack already exists and is healthy - skipping"
-          else
-            echo "Grafana stack in state: $STATUS - skipping update"
+            echo "Grafana stack healthy - skipping"
           fi
 
       - name: Assign SSO users
@@ -89,7 +90,6 @@ jobs:
             --update-instruction-batch \
               "action=ADD,role=ADMIN,users=[{id=b1738dea-8051-707d-472d-cf6e504f2627,type=SSO_USER},{id=71239d8a-b011-707c-a5a0-d56fc0d04462,type=SSO_USER}]" \
             --region ${{ env.AWS_REGION }} || true
-          echo "SSO users assigned"
 
       - name: Deploy CloudWatch stack
         run: |
@@ -98,12 +98,10 @@ jobs:
             --region ${{ env.AWS_REGION }} \
             --query "Stacks[0].StackStatus" \
             --output text 2>/dev/null || echo "DOES_NOT_EXIST")
-
           SNS_ARN=$(aws ssm get-parameter \
             --name "/observability/production/sns-topic-arn" \
             --region ${{ env.AWS_REGION }} \
             --query "Parameter.Value" --output text)
-
           if [ "$STATUS" = "DOES_NOT_EXIST" ] || [ "$STATUS" = "DELETE_COMPLETE" ]; then
             aws cloudformation create-stack \
               --stack-name production-cloudwatch-observability \
@@ -117,9 +115,7 @@ jobs:
             aws cloudformation wait stack-create-complete \
               --stack-name production-cloudwatch-observability \
               --region ${{ env.AWS_REGION }}
-            echo "CloudWatch stack created"
           elif [ "$STATUS" = "CREATE_COMPLETE" ] || [ "$STATUS" = "UPDATE_COMPLETE" ]; then
-            echo "CloudWatch stack already healthy - checking for updates"
             aws cloudformation update-stack \
               --stack-name production-cloudwatch-observability \
               --template-body file://cloudformation/cloudwatch/cloudwatch-observability.yaml \
@@ -128,8 +124,7 @@ jobs:
                 ParameterKey=EnvironmentName,ParameterValue=${{ env.ENVIRONMENT }} \
                 ParameterKey=ApplicationName,ParameterValue=myapp \
                 ParameterKey=AlertSNSTopicArn,ParameterValue=$SNS_ARN \
-              --capabilities CAPABILITY_IAM 2>&1 | \
-              grep -v "No updates are to be performed" || true
+              --capabilities CAPABILITY_IAM 2>&1 | grep -v "No updates" || true
           fi
 
       - name: Deploy monitoring infrastructure (EC2, ALB, RDS)
@@ -139,7 +134,7 @@ jobs:
             --region ${{ env.AWS_REGION }} \
             --query "Stacks[0].StackStatus" \
             --output text 2>/dev/null || echo "DOES_NOT_EXIST")
-
+          echo "Monitoring infra status: $STATUS"
           if [ "$STATUS" = "DOES_NOT_EXIST" ] || [ "$STATUS" = "DELETE_COMPLETE" ]; then
             aws cloudformation create-stack \
               --stack-name production-monitoring-infra \
@@ -148,41 +143,18 @@ jobs:
               --parameters \
                 ParameterKey=EnvironmentName,ParameterValue=${{ env.ENVIRONMENT }} \
               --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM
-            echo "Monitoring infra creating - EC2, ALB, RDS..."
             aws cloudformation wait stack-create-complete \
               --stack-name production-monitoring-infra \
               --region ${{ env.AWS_REGION }}
-            echo "Monitoring infra created"
           elif [ "$STATUS" = "CREATE_COMPLETE" ] || [ "$STATUS" = "UPDATE_COMPLETE" ]; then
-            echo "Monitoring infra healthy - checking for updates"
             aws cloudformation update-stack \
               --stack-name production-monitoring-infra \
               --template-body file://cloudformation/ec2/monitoring-infrastructure.yaml \
               --region ${{ env.AWS_REGION }} \
               --parameters \
                 ParameterKey=EnvironmentName,ParameterValue=${{ env.ENVIRONMENT }} \
-              --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM 2>&1 | \
-              grep -v "No updates are to be performed" || true
+              --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM 2>&1 | grep -v "No updates" || true
           fi
-
-      - name: Print all URLs
-        run: |
-          WORKSPACE_ID=$(aws ssm get-parameter \
-            --name "/observability/production/grafana-workspace-id" \
-            --region ${{ env.AWS_REGION }} \
-            --query "Parameter.Value" --output text)
-
-          ALB=$(aws cloudformation describe-stacks \
-            --stack-name production-monitoring-infra \
-            --region ${{ env.AWS_REGION }} \
-            --query "Stacks[0].Outputs[?OutputKey=='ALBDNSName'].OutputValue" \
-            --output text 2>/dev/null || echo "not deployed yet")
-
-          echo "============================================"
-          echo "Grafana: https://${WORKSPACE_ID}.grafana-workspace.${{ env.AWS_REGION }}.amazonaws.com"
-          echo "Dashboard: https://${WORKSPACE_ID}.grafana-workspace.${{ env.AWS_REGION }}.amazonaws.com/d/aws-infra-v1"
-          echo "ALB: http://${ALB}"
-          echo "============================================"
 
       - name: Auto-update Grafana dashboard with new instance IDs
         run: |
@@ -192,99 +164,77 @@ jobs:
                       "Name=instance-state-name,Values=running" \
             --query "Reservations[0].Instances[0].InstanceId" \
             --output text)
-
           ALB_DIM=$(aws elbv2 describe-load-balancers \
             --region ${{ env.AWS_REGION }} \
             --query "LoadBalancers[?LoadBalancerName=='production-monitoring-alb'].LoadBalancerArn" \
             --output text | sed 's|arn:aws:elasticloadbalancing:[^:]*:[^:]*:||')
-
           WORKSPACE_ID=$(aws ssm get-parameter \
             --name "/observability/production/grafana-workspace-id" \
             --region ${{ env.AWS_REGION }} \
             --query "Parameter.Value" --output text)
-
           GRAFANA_URL="https://${WORKSPACE_ID}.grafana-workspace.${{ env.AWS_REGION }}.amazonaws.com"
-
           API_KEY=$(aws grafana create-workspace-api-key \
             --workspace-id $WORKSPACE_ID \
-            --key-name "auto-update-${{ github.run_id }}" \
+            --key-name "auto-${{ github.run_id }}" \
             --key-role ADMIN \
             --seconds-to-live 300 \
             --region ${{ env.AWS_REGION }} \
             --query "key" --output text)
-
-          echo "Instance: $INSTANCE_ID"
-          echo "ALB: $ALB_DIM"
-
-          python3 << PYEOF
-import json
-
-instance_id = "$INSTANCE_ID"
-alb_dim     = "$ALB_DIM"
-rds_id      = "production-monitoring-db"
-ds_uid      = "efjjqjppp5gjkb"
-ds          = {"type": "cloudwatch", "uid": ds_uid}
-
-def t(ref, ns, metric, dn, dv, stat="Average", alias=""):
-    return {"refId": ref, "datasource": ds, "queryMode": "Metrics",
-            "namespace": ns, "metricName": metric, "statistic": stat,
-            "period": "60", "region": "us-east-1",
-            "dimensions": {dn: dv}, "matchExact": True,
-            "alias": alias, "metricQueryType": 0, "metricEditorMode": 0}
-
-dashboard = {
-  "title": "AWS Infrastructure Observability", "uid": "aws-infra-v1",
-  "schemaVersion": 38, "refresh": "1m",
-  "tags": ["aws","observability","cloudwatch"],
-  "time": {"from": "now-1h", "to": "now"},
-  "panels": [
-    {"id":1,"type":"gauge","title":"CPU Utilization",
-     "gridPos":{"h":6,"w":6,"x":0,"y":0},"datasource":ds,
-     "targets":[t("A","AWS/EC2","CPUUtilization","InstanceId",instance_id)],
-     "fieldConfig":{"defaults":{"min":0,"max":100,"unit":"percent",
-       "thresholds":{"mode":"absolute","steps":[{"color":"green","value":None},
-       {"color":"yellow","value":60},{"color":"red","value":80}]}}}},
-    {"id":2,"type":"gauge","title":"Memory Utilization",
-     "gridPos":{"h":6,"w":6,"x":6,"y":0},"datasource":ds,
-     "targets":[t("A","CWAgent","mem_used_percent","InstanceId",instance_id)],
-     "fieldConfig":{"defaults":{"min":0,"max":100,"unit":"percent",
-       "thresholds":{"mode":"absolute","steps":[{"color":"green","value":None},
-       {"color":"yellow","value":70},{"color":"red","value":85}]}}}},
-    {"id":3,"type":"timeseries","title":"CPU Trend",
-     "gridPos":{"h":6,"w":12,"x":12,"y":0},"datasource":ds,
-     "targets":[t("A","AWS/EC2","CPUUtilization","InstanceId",instance_id,"Average","Avg CPU"),
-                t("B","AWS/EC2","CPUUtilization","InstanceId",instance_id,"Maximum","Max CPU")]},
-    {"id":4,"type":"timeseries","title":"ALB Request Count",
-     "gridPos":{"h":7,"w":12,"x":0,"y":6},"datasource":ds,
-     "targets":[t("A","AWS/ApplicationELB","RequestCount","LoadBalancer",alb_dim,"Sum","Requests"),
-                t("B","AWS/ApplicationELB","HTTPCode_Target_5XX_Count","LoadBalancer",alb_dim,"Sum","5xx")]},
-    {"id":5,"type":"timeseries","title":"RDS Connections",
-     "gridPos":{"h":7,"w":12,"x":12,"y":6},"datasource":ds,
-     "targets":[t("A","AWS/RDS","DatabaseConnections","DBInstanceIdentifier",rds_id,"Average","Connections")]},
-    {"id":6,"type":"stat","title":"Server Down Status",
-     "gridPos":{"h":5,"w":6,"x":0,"y":13},"datasource":ds,
-     "targets":[t("A","AWS/EC2","StatusCheckFailed","InstanceId",instance_id,"Maximum")],
-     "options":{"reduceOptions":{"calcs":["lastNotNull"]},"colorMode":"background","graphMode":"none"},
-     "fieldConfig":{"defaults":{"mappings":[{"type":"value","options":{
-       "0":{"text":"UP","color":"green","index":0},
-       "1":{"text":"DOWN","color":"red","index":1}}}],
-       "thresholds":{"mode":"absolute","steps":[{"color":"green","value":None},{"color":"red","value":1}]}}}}
-  ]
-}
-
-with open("/tmp/dashboard.json", "w") as f:
-    json.dump(dashboard, f, indent=2)
-print(f"Dashboard generated for instance: {instance_id}")
-PYEOF
-
+          echo "Instance: $INSTANCE_ID | ALB: $ALB_DIM"
+          cat > /tmp/dashboard.json << DASHEOF
+          {
+            "title": "AWS Infrastructure Observability",
+            "uid": "aws-infra-v1",
+            "schemaVersion": 38,
+            "refresh": "1m",
+            "tags": ["aws","observability","cloudwatch"],
+            "time": {"from": "now-1h", "to": "now"},
+            "panels": [
+              {"id":1,"type":"gauge","title":"CPU Utilization","gridPos":{"h":6,"w":6,"x":0,"y":0},
+               "datasource":{"type":"cloudwatch","uid":"efjjqjppp5gjkb"},
+               "targets":[{"refId":"A","datasource":{"type":"cloudwatch","uid":"efjjqjppp5gjkb"},"queryMode":"Metrics","namespace":"AWS/EC2","metricName":"CPUUtilization","statistic":"Average","period":"60","region":"us-east-1","dimensions":{"InstanceId":"$INSTANCE_ID"},"matchExact":true,"metricQueryType":0,"metricEditorMode":0}],
+               "fieldConfig":{"defaults":{"min":0,"max":100,"unit":"percent","thresholds":{"mode":"absolute","steps":[{"color":"green","value":null},{"color":"yellow","value":60},{"color":"red","value":80}]}}}},
+              {"id":2,"type":"gauge","title":"Memory Utilization","gridPos":{"h":6,"w":6,"x":6,"y":0},
+               "datasource":{"type":"cloudwatch","uid":"efjjqjppp5gjkb"},
+               "targets":[{"refId":"A","datasource":{"type":"cloudwatch","uid":"efjjqjppp5gjkb"},"queryMode":"Metrics","namespace":"CWAgent","metricName":"mem_used_percent","statistic":"Average","period":"60","region":"us-east-1","dimensions":{"InstanceId":"$INSTANCE_ID"},"matchExact":true,"metricQueryType":0,"metricEditorMode":0}],
+               "fieldConfig":{"defaults":{"min":0,"max":100,"unit":"percent","thresholds":{"mode":"absolute","steps":[{"color":"green","value":null},{"color":"yellow","value":70},{"color":"red","value":85}]}}}},
+              {"id":3,"type":"timeseries","title":"CPU Trend","gridPos":{"h":6,"w":12,"x":12,"y":0},
+               "datasource":{"type":"cloudwatch","uid":"efjjqjppp5gjkb"},
+               "targets":[{"refId":"A","datasource":{"type":"cloudwatch","uid":"efjjqjppp5gjkb"},"queryMode":"Metrics","namespace":"AWS/EC2","metricName":"CPUUtilization","statistic":"Average","period":"60","region":"us-east-1","dimensions":{"InstanceId":"$INSTANCE_ID"},"matchExact":true,"alias":"Avg CPU","metricQueryType":0,"metricEditorMode":0},
+                           {"refId":"B","datasource":{"type":"cloudwatch","uid":"efjjqjppp5gjkb"},"queryMode":"Metrics","namespace":"AWS/EC2","metricName":"CPUUtilization","statistic":"Maximum","period":"60","region":"us-east-1","dimensions":{"InstanceId":"$INSTANCE_ID"},"matchExact":true,"alias":"Max CPU","metricQueryType":0,"metricEditorMode":0}]},
+              {"id":4,"type":"timeseries","title":"ALB Request Count","gridPos":{"h":7,"w":12,"x":0,"y":6},
+               "datasource":{"type":"cloudwatch","uid":"efjjqjppp5gjkb"},
+               "targets":[{"refId":"A","datasource":{"type":"cloudwatch","uid":"efjjqjppp5gjkb"},"queryMode":"Metrics","namespace":"AWS/ApplicationELB","metricName":"RequestCount","statistic":"Sum","period":"60","region":"us-east-1","dimensions":{"LoadBalancer":"$ALB_DIM"},"matchExact":true,"alias":"Requests","metricQueryType":0,"metricEditorMode":0},
+                           {"refId":"B","datasource":{"type":"cloudwatch","uid":"efjjqjppp5gjkb"},"queryMode":"Metrics","namespace":"AWS/ApplicationELB","metricName":"HTTPCode_Target_5XX_Count","statistic":"Sum","period":"60","region":"us-east-1","dimensions":{"LoadBalancer":"$ALB_DIM"},"matchExact":true,"alias":"5xx","metricQueryType":0,"metricEditorMode":0}]},
+              {"id":5,"type":"timeseries","title":"RDS Connections","gridPos":{"h":7,"w":12,"x":12,"y":6},
+               "datasource":{"type":"cloudwatch","uid":"efjjqjppp5gjkb"},
+               "targets":[{"refId":"A","datasource":{"type":"cloudwatch","uid":"efjjqjppp5gjkb"},"queryMode":"Metrics","namespace":"AWS/RDS","metricName":"DatabaseConnections","statistic":"Average","period":"60","region":"us-east-1","dimensions":{"DBInstanceIdentifier":"production-monitoring-db"},"matchExact":true,"alias":"Connections","metricQueryType":0,"metricEditorMode":0}]},
+              {"id":6,"type":"stat","title":"Server Down Status","gridPos":{"h":5,"w":6,"x":0,"y":13},
+               "datasource":{"type":"cloudwatch","uid":"efjjqjppp5gjkb"},
+               "targets":[{"refId":"A","datasource":{"type":"cloudwatch","uid":"efjjqjppp5gjkb"},"queryMode":"Metrics","namespace":"AWS/EC2","metricName":"StatusCheckFailed","statistic":"Maximum","period":"60","region":"us-east-1","dimensions":{"InstanceId":"$INSTANCE_ID"},"matchExact":true,"metricQueryType":0,"metricEditorMode":0}],
+               "options":{"reduceOptions":{"calcs":["lastNotNull"]},"colorMode":"background","graphMode":"none"},
+               "fieldConfig":{"defaults":{"mappings":[{"type":"value","options":{"0":{"text":"UP","color":"green","index":0},"1":{"text":"DOWN","color":"red","index":1}}}],"thresholds":{"mode":"absolute","steps":[{"color":"green","value":null},{"color":"red","value":1}]}}}}
+            ]
+          }
+          DASHEOF
           curl -sf -X POST \
             -H "Authorization: Bearer $API_KEY" \
             -H "Content-Type: application/json" \
             -d "{\"dashboard\": $(cat /tmp/dashboard.json), \"overwrite\": true, \"folderId\": 0}" \
             "${GRAFANA_URL}/api/dashboards/import" && \
           echo "Dashboard auto-updated with instance: $INSTANCE_ID"
-
           aws grafana delete-workspace-api-key \
             --workspace-id $WORKSPACE_ID \
-            --key-name "auto-update-${{ github.run_id }}" \
+            --key-name "auto-${{ github.run_id }}" \
             --region ${{ env.AWS_REGION }} || true
+
+      - name: Print all URLs
+        run: |
+          WORKSPACE_ID=$(aws ssm get-parameter \
+            --name "/observability/production/grafana-workspace-id" \
+            --region ${{ env.AWS_REGION }} \
+            --query "Parameter.Value" --output text)
+          echo "============================================"
+          echo "Grafana: https://${WORKSPACE_ID}.grafana-workspace.${{ env.AWS_REGION }}.amazonaws.com"
+          echo "Dashboard: https://${WORKSPACE_ID}.grafana-workspace.${{ env.AWS_REGION }}.amazonaws.com/d/aws-infra-v1"
+          echo "============================================"
